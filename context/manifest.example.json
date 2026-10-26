@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "fixture": "existing-coding-test-app",
+  "repository": "Use the included local shared-app.bundle; remote GitHub access is not required",
+  "commit": "a9f23fbc4ccddfd43d8a72e6b4ab5d369fd102a5",
+  "install": "npm ci --no-audit --no-fund",
+  "start": "npm run dev",
+  "port": 8000,
+  "health_path": "/health",
+  "edit_file": "api/index.mjs",
+  "edit_replace": "exe.dev retry workflow verified",
+  "edit_with": "Sandbox workload: <unique-provider-case-trial-marker>",
+  "edit_expected_occurrences": 2,
+  "browser_assertions": [
+    "Title and h1 contain the unique marker",
+    "Fill the name field with the unique marker and click Greet",
+    "#greeting equals Hello, <unique-provider-case-trial-marker>!",
+    "Click #counter and verify Clicks: 1"
+  ],
+  "resume_assertions": "Read existing browser/RAM/disk state before any navigation, reload, or second edit. Then use a second marker for the resumed workload.",
+  "resource_shape": {
+    "vcpu": 4,
+    "memory_gib": 8
+  },
+  "activity_window_seconds": 60,
+  "resource_sample_seconds": 2,
+  "activity_probe_seconds": 5,
+  "bucket": "YOUR_TEST_BUCKET",
+  "region": "us-east-1",
+  "aws_profile_for_shared_fixture": "YOUR_AWS_PROFILE",
+  "expected_aws_account": "YOUR_AWS_ACCOUNT_ID",
+  "s3_prefixes": {
+    "tensorlake": "library-test/tensorlake/"
+  },
+  "seed_relative_path": "readme.txt",
+  "seed_sha256": "939084d46e7d5ef62dc63130b6580dbeb96c847333cf2d9a836f6b46649b14af",
+  "write_prefix_rule": "Use a unique n100-<run>/<case>/<trial>/ subdirectory in the assigned provider prefix. Delete only those generated keys.",
+  "network_probe_private_file": "PATH_TO_YOUR_FIXTURE/probe-private.json",
+  "network_probe_refresh_command": "python3 PATH_TO_YOUR_FIXTURE/prepare_network_probe.py",
+  "network_probe_instructions": "Use the controlled S3 object for ordinary HTTPS workload probes. Separately, check the provider's IPv6 docs and make one forced AF_INET6 HTTPS request from one sandbox per provider (e.g. curl --ipv6); record the docs link, command, connected IPv6 address and response/error. Reuse existing conclusive evidence. Do not repeat IPv6 probes in each N=100 trial. Never log the signed query string.",
+  "credential_instructions": "Fetch current provider credentials from the existing evaluation config. Export shared AWS credentials from the verified profile into private process-local files only; do not publish them or put control-plane keys in the guest. Refresh or report expiry before dispatch; do not classify expired credentials as provider networking failures.",
+  "test_scope": "Only clone, edit, install/start, browser, mounted-S3 and measurement work. Do not deploy, run a Supabase migration, push code, change plans, or stop unrelated resources.",
+  "write_payload_bytes": 87
+}

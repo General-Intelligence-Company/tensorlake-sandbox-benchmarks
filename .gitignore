@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+probe-private.json
+outputs/
+output/
+*.log
+.DS_Store
+
+context/manifest.json
+fixture/manifest.json

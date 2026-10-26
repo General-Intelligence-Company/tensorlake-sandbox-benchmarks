@@ -1,0 +1,12 @@
+{
+  "name": "exe-stress-eval",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "escape-html": "1.0.3"
+  }
+}

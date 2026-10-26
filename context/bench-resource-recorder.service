@@ -1,0 +1,8 @@
+[Unit]
+Description=Benchmark resource sampler
+After=local-fs.target
+[Service]
+ExecStart=/usr/bin/python3 /opt/bench/record_resource_usage.py
+Restart=no
+[Install]
+WantedBy=multi-user.target

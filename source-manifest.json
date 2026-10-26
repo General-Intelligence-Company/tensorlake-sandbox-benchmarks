@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "purpose": "Public source file integrity; no private Git history required",
+  "fixture_commit": "a9f23fbc4ccddfd43d8a72e6b4ab5d369fd102a5",
+  "files": {
+    ".gitignore": "10d4fdccd638487effa7287f7843010cf0ab0e16e520eaf68eea7bd5cc2f6fd5",
+    "README.md": "4425060f8b17bead4cc2c5b560e4f1a1f39aef2a5c53e99b4cfbade75f3dea03",
+    "check_source_integrity.py": "46503125abc4c2fe92250f3126ec081a66545817098345b76ed5fa6684c216e7",
+    "context/bench-resource-recorder.service": "589711be9ea8668603ba214daa162af7f66aa44d2206e743596d55451c55319c",
+    "context/manifest.example.json": "1961bf042f785752aecf47d327c8f130a1222a1d0dc2c74438dd582f66d3cc29",
+    "context/record_resource_usage.py": "3224922b0435e31bb20cfafeffc75404a34339937958ebd95e1e8cfddadc189b",
+    "context/run_sandbox_workload.py": "e18d91a5b4547812770c9269a64fba3359bd4ecc48c35e29520742f0228b06bf",
+    "context/sandbox_workload.py": "a864a02fc7c49acab108c7e6ee2343483225e7a3cf6cdd21d73ab643a9d018f1",
+    "context/shared-app.bundle": "970712e622cf310dd1dbaea22a5d1c416dcf51e6f455c6c47b58f6b4dc6ad696",
+    "controller/check_s3_read_retries.py": "12dc9442568135aeb5a102103042c55e8de878ea6db093bfa182427054217b7b",
+    "controller/run_benchmark.py": "6e22857cfb5b7adfc5312f03186bd90872a62d29e24397965078f788cd3e2f1c",
+    "controller/summarize_results.py": "92e7fd0cba23102d85bd3e45ac44b21afe2e3f345b0c220fd047c54b2cb2ca41",
+    "controller/verify_saved_activity.py": "a0d5567a1ebeff5acf2f714b3a13c6c5acc46a6cc125d6bb522f175f0e50040f",
+    "fixture/prepare_network_probe.example.py": "6b2e45c585f260bb9b04335c5fa27fd4b78e958551005e103832c9a9a357e19f",
+    "fixture-app/.gitignore": "9faed4b4c07e86ce1ec5ece6cf508f9b0bd2898d1b6f959149aee5a5342d36fa",
+    "fixture-app/api/index.mjs": "4fde440764bc27896849bcaa7b81fc24e7e0763f20d44794ce0c9f787bf7ff0f",
+    "fixture-app/app.test.mjs": "4133949d3167f0f6d1939f13f40916850a3eba91c0cbab461452ae48403cd34f",
+    "fixture-app/package-lock.json": "4cce71ee29f066735858a57b01f97fd8aa3a70af7669e916edca84315f25d301",
+    "fixture-app/package.json": "ecbecafb093581b4428dfcdb832c80552fbd954f9940718794f56ea89cf15f08",
+    "fixture-app/server.mjs": "73c2d752e876a79973eea2aca703efdcef32c9f6c193dddfc575185627b7afd3",
+    "image/build_benchmark_image.py": "862809f7e3f4821b60442995032b261cdf48e45442ef4fbc886a9afbb9073668",
+    "image/build_tools_image.py": "62afb2fb783b3e06f9cd7b143d9e7995c8b54ec514432a38d9edb0c6654f7f3a"
+  }
+}
