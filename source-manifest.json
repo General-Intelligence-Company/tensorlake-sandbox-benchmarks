@@ -4,7 +4,7 @@
   "fixture_commit": "a9f23fbc4ccddfd43d8a72e6b4ab5d369fd102a5",
   "files": {
     ".gitignore": "10d4fdccd638487effa7287f7843010cf0ab0e16e520eaf68eea7bd5cc2f6fd5",
-    "README.md": "4425060f8b17bead4cc2c5b560e4f1a1f39aef2a5c53e99b4cfbade75f3dea03",
+    "README.md": "c125b693d7578568974b5499bd1d6cf7f3a146d9ecfe1b5a975103c4f328a9c0",
     "check_source_integrity.py": "46503125abc4c2fe92250f3126ec081a66545817098345b76ed5fa6684c216e7",
     "context/bench-resource-recorder.service": "589711be9ea8668603ba214daa162af7f66aa44d2206e743596d55451c55319c",
     "context/manifest.example.json": "1961bf042f785752aecf47d327c8f130a1222a1d0dc2c74438dd582f66d3cc29",

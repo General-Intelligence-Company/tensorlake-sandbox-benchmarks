@@ -13,7 +13,9 @@ The large benchmark used **1,000 sandboxes per test case**, each with **4 vCPU, 
 | Memory snapshot fork | Save disk and RAM, then create a different sandbox from them. Check that the running app, browser state and files survived. |
 | Stop and resume | Stop a sandbox, then resume that same sandbox. Check its saved state before changing or restarting anything. |
 
-At most 64 create requests run at once. This limits how quickly we launch sandboxes; it does not limit the test to 64 running sandboxes.
+At most **64 create-and-connect requests run at once**. As one finishes, the next queued request starts. This limits how quickly we launch sandboxes; it does not limit the test to 64 running sandboxes.
+
+To change this limit, edit `LAUNCH_CONCURRENCY = 64` near the top of [controller/run_benchmark.py](controller/run_benchmark.py#L43). `SANDBOX_COUNT` controls the total number of sandboxes per test case; `LAUNCH_CONCURRENCY` controls how many create-and-connect requests can be in progress at once.
 
 ## What runs inside a sandbox
 
