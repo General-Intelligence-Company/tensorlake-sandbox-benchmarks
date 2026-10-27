@@ -683,6 +683,9 @@ class Runner:
             queued = time.monotonic()
             # 1. Bound launch concurrency. A fork uses snapshot_id; a fresh VM
             # uses the prepared image and explicit resource configuration.
+            # The create waits on the server (SDK 0.5.158 and later) and
+            # returns as soon as the sandbox runs; the SDK no longer polls
+            # the sandbox status on a timer after sending the request.
             async with self.launch_slots:
                 trial["launch_queue_s"] = time.monotonic() - queued
                 trial["t0"] = time.monotonic()
@@ -696,7 +699,6 @@ class Runner:
                     startup_timeout=180,
                     request_timeout=180,
                     cancel_on_timeout=True,
-                    poll_interval=1,
                 )
                 if snapshot:
                     create_options["snapshot_id"] = snapshot

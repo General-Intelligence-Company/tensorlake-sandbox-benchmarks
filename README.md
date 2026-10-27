@@ -46,6 +46,8 @@ For example, “terminal ready: 2 seconds” and “S3 write verified: 6 seconds
 
 S3 verification is the final workflow step, so its time matches full-workflow completion. Waiting for a launch slot is recorded separately. The later activity test and cleanup are not included in these startup times.
 
+The create request waits on the server and returns as soon as the sandbox is running (Tensorlake SDK 0.5.158 and later). The historical results were produced with SDK 0.5.157, which polled the sandbox status once per second after sending the create, so their startup milestones include up to one second of polling delay that new runs do not. Stop and resume still poll once per second in the SDK, so their timings keep that delay.
+
 - **Mean:** the average time.
 - **Median:** the middle time when results are sorted.
 - **P95:** 95% of measured results finished within this time.
@@ -114,7 +116,7 @@ The fixture app retains its original `exe.dev` text because the workload replace
 
 This is the source for our test setup, not a ready-to-run command. **Review the configuration before launching: `SANDBOX_COUNT` defaults to 1000.**
 
-1. Install Python, `tensorlake==0.5.157`, `boto3`, `httpx` and the AWS CLI. Provide your own `TENSORLAKE_API_KEY`.
+1. Install Python, `tensorlake==0.5.158`, `boto3`, `httpx` and the AWS CLI. Provide your own `TENSORLAKE_API_KEY`.
 2. Set `ROOT`, `OUT`, `FIXTURE` and `IMAGE` in the controller for your environment. These identify the source directory, results directory, shared test files and prepared image. The controller expects image files under `ROOT/context`.
 3. Copy [context/manifest.example.json](context/manifest.example.json) to `manifest.json` in both the shared-test directory and image context. Configure your disposable S3 bucket, AWS profile, expected account ID, and a known test file with its expected hash.
 4. Adapt [fixture/prepare_network_probe.example.py](fixture/prepare_network_probe.example.py) as the shared-test directory's `prepare_network_probe.py`. It creates a temporary signed URL for the network check. Keep that URL and all credentials out of Git.
