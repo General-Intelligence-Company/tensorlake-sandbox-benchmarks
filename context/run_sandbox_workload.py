@@ -1,6 +1,7 @@
 """Serve controller requests while one main thread owns the sandbox workload."""
 
 import json
+import os
 import queue
 import signal
 import threading
@@ -59,8 +60,9 @@ def main():
             self.end_headers()
             self.wfile.write(body)
 
-    # Tensorlake authenticates port 8123 upstream; no provider key enters the guest.
-    web = ThreadingHTTPServer(("0.0.0.0", 8123), Handler)
+    # The portable runner reaches this over native exec, on loopback only.
+    # The original Tensorlake controller uses its authenticated port proxy.
+    web = ThreadingHTTPServer((os.environ.get("BENCH_BIND_HOST", "0.0.0.0"), 8123), Handler)
     threading.Thread(target=web.serve_forever, daemon=True).start()
     process_workload_requests(workload, jobs)
 

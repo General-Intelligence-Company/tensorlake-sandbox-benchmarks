@@ -9,6 +9,10 @@ outputs/
 output/
 *.log
 .DS_Store
+*.egg-info/
+dist/
+build/
+benchmark.toml
 
 context/manifest.json
 fixture/manifest.json
