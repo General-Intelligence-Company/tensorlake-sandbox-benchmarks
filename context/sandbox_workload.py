@@ -135,7 +135,7 @@ class SandboxWorkload:
         assert path.read_bytes() == payload
         local_readback_s = time.monotonic() - read_started
         return {
-            "key": self.config["s3_prefixes"]["tensorlake"] + rel,
+            "key": self.config["s3_prefixes"][self.config.get("provider", "tensorlake")] + rel,
             "sha256": sha256(payload),
             "bytes": len(payload),
             "payload_size_bytes": self.config["write_payload_bytes"],
@@ -274,15 +274,15 @@ class SandboxWorkload:
             "s3fs",
             self.config["bucket"]
             + ":/"
-            + self.config["s3_prefixes"]["tensorlake"].rstrip("/"),
+            + self.config["s3_prefixes"][self.config.get("provider", "tensorlake")].rstrip("/"),
             "/mnt/library",
             "-f",
             "-o",
             "use_session_token",
             "-o",
-            "url=https://s3.us-east-1.amazonaws.com",
+            "url=https://s3." + self.config["region"] + ".amazonaws.com",
             "-o",
-            "endpoint=us-east-1",
+            "endpoint=" + self.config["region"],
             "-o",
             "allow_other",
             "-o",
@@ -439,7 +439,7 @@ class SandboxWorkload:
         saved = (
             Path("/mnt/library")
             / self.last_s3_write["key"].removeprefix(
-                self.config["s3_prefixes"]["tensorlake"]
+                self.config["s3_prefixes"][self.config.get("provider", "tensorlake")]
             )
         ).read_bytes()
         return {
@@ -474,7 +474,7 @@ class SandboxWorkload:
         text = p.read_text()
         needle = (
             "Sandbox workload: " + self.previous_marker
-            if self.mode == "resume"
+            if self.mode in ["resume", "disk_resume"]
             else self.config["edit_replace"]
         )
         assert text.count(needle) == 2
@@ -500,7 +500,7 @@ class SandboxWorkload:
     # The controller verifies preserved state before this method makes any new changes.
     def run_workload(self, config):
         self.mode = config["mode"]
-        self.previous_marker = self.marker
+        self.previous_marker = config.get("previous_marker", self.marker)
         self.case_name = config["case"]
         self.trial_index = str(config["index"])
         self.run_id = config["run"]
@@ -510,7 +510,9 @@ class SandboxWorkload:
         self.evidence_dir = Path("/workspace/bench-evidence") / self.case_name
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
         self.step_results = []
-        if self.mode != "resume":
+        if self.mode == "disk_resume":
+            self.app_dir = Path(config["repo_path"])
+        if self.mode not in ["resume", "disk_resume"]:
             self.app_dir = Path("/workspace") / (
                 "source-app" if self.mode == "source" else "workload-app"
             )
@@ -523,10 +525,10 @@ class SandboxWorkload:
             self.measure_step("mount", self.ensure_s3_mount)
         self.measure_step("s3_read", self.verify_s3_seed)
         # 2. Prepare the repo and dependencies; resumes reuse what was saved.
-        if self.mode != "resume":
+        if self.mode not in ["resume", "disk_resume"]:
             self.measure_step("clone", self.clone_test_repository)
         self.measure_step("edit", self.apply_code_change)
-        if self.mode != "resume":
+        if self.mode not in ["resume", "disk_resume"]:
             self.measure_step(
                 "install",
                 lambda: self.run_command(
