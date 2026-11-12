@@ -1,6 +1,6 @@
 # Provider setup
 
-The portable runner uses the integrations below. These adapters have offline contract checks. A passing local check does not establish that your account has snapshot access, enough quota, or a supported image.
+The portable runner uses the integrations below. The adapters have offline contract checks and [N=5 live validation results](live-validation-2026-11-12.md) for Boat, Tensorlake, Beam VMs and Modal. A passing check does not establish that your account has snapshot access, enough quota, or a supported image.
 
 | Provider | Install extra | Credentials | Implemented lifecycle cases |
 | --- | --- | --- | --- |
@@ -21,7 +21,7 @@ Uses the sandbox SDK with request retries disabled. `provider_options.image` can
 
 Uses VM runtime and the experimental memory snapshot API in the pinned SDK. Ask Modal for access if your account does not have it. Restoring a memory snapshot creates a new sandbox ID, so it is called `memory`, not same-ID `resume`, here. Capturing memory stops the source.
 
-Memory snapshots have no delete method in this SDK. The report keeps their IDs, reports cleanup as incomplete, and leaves them to expire after seven days. Disk images use the image deletion RPC followed by an independent image lookup. The runner only confirms deletion after that lookup returns not found. Modal's SDK has its own internal transport retry behavior; the controller submits each lifecycle operation once. [Snapshots](https://modal.com/docs/guide/sandbox-snapshots)
+Memory snapshots have no delete method in this SDK. The report keeps their IDs, reports cleanup as incomplete, and leaves them to expire after seven days. Disk images use the pinned SDK's internal image deletion RPC followed by an independent image lookup, both on the SDK event loop. The runner only confirms deletion after that lookup returns not found. Modal's SDK has its own internal transport retry behavior; the controller submits each lifecycle operation once. [Snapshots](https://modal.com/docs/guide/sandbox-snapshots)
 
 ## Boat
 
@@ -51,7 +51,7 @@ The API transports the same commands as the SSH interface. This adapter uses HTT
 
 ## Images and resource shapes
 
-The full workflow needs Linux with `bash`, Python, `apt-get`, root or passwordless `sudo`, and working FUSE mounts. It installs Git, Node/npm, s3fs, Playwright and Chromium when absent. A custom image must support those tools. A FUSE permission error stays in the result; it is not converted into a successful S3 test.
+The full workflow needs Linux with `bash`, Python, `apt-get`, root or passwordless `sudo`, and working FUSE mounts. It installs Git, Node/npm, s3fs, Playwright and Chromium when absent. A custom image must support those tools. The runner enables the optional `compat_dir` mount flag only when the installed s3fs advertises it. A FUSE permission error stays in the result; it is not converted into a successful S3 test.
 
 CPU units differ by provider. The report stores the requested configuration; the artifact archive contains `/proc` and cgroup resource samples. Boat's named machine type and Blaxel's memory-based allocation do not map directly to `cpus`. This runner does not claim that all providers supply identical physical cores.
 
