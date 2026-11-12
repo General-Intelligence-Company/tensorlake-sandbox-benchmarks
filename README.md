@@ -117,6 +117,6 @@ python3 check_source_integrity.py
 python3 controller/check_s3_read_retries.py
 ```
 
-These checks do not start cloud resources. The adapter code was checked against the pinned SDK interfaces, with fake transports and offline lifecycle tests. The portable adapters have **not** been validated by new live provider cohorts. Run a small test in your own account before scaling.
+These checks do not start cloud resources. The adapters have pinned-SDK and offline regression tests. We also ran live N=5 workflow validation on Boat, Tensorlake, Beam VMs and Modal. See the [results and remaining limitations](docs/live-validation-2026-11-12.md). Blaxel and exe.dev were not run in that validation. Run a small test in your own account before scaling.
 
 The shared workload lives in `context/`; provider operations are in `sandbox_bench/providers.py`; orchestration and evidence handling are in `sandbox_bench/runner.py`. Add another adapter without copying the workload. The original controller, source manifest and historical artifacts remain separate.

@@ -145,7 +145,7 @@ class S3Fixture:
             "AWS_SESSION_TOKEN": frozen.token,
             "AWS_DEFAULT_REGION": config["region"],
         }
-        evidence.secrets.extend(self.env.values())
+        evidence.secrets.extend((frozen.access_key, frozen.secret_key, frozen.token))
         # Read the user's existing seed. Never overwrite it or create a shared fixture.
         seed = self.client.get_object(
             Bucket=config["bucket"], Key=config["prefix"] + config["seed"]
@@ -306,7 +306,7 @@ class Runner:
             )
             if r.exit_code != 0:
                 raise ProviderError(
-                    f"Guest command exited {r.exit_code}: {r.stderr[-1000:]}"
+                    f"Guest command exited {r.exit_code}: {r.stdout[-1000:]} {r.stderr[-1000:]}"
                 )
             return r.stdout
         except Exception as exc:
@@ -356,7 +356,10 @@ if command -v sudo >/dev/null; then SUDO=sudo; else SUDO=; fi
 $SUDO mkdir -p /opt/bench /workspace /mnt/library /var/log/bench
 if ! test -x /opt/bench-venv/bin/python || ! command -v s3fs >/dev/null; then
   $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-venv python3 git nodejs npm s3fs curl
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3 git s3fs curl
+  if ! command -v node >/dev/null || ! command -v npm >/dev/null; then
+    $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs npm
+  fi
   $SUDO python3 -m venv /opt/bench-venv
   $SUDO /opt/bench-venv/bin/pip -q install playwright==1.58.0
   $SUDO /opt/bench-venv/bin/python -m playwright install --with-deps chromium
@@ -400,22 +403,16 @@ $SUDO chmod 1777 /workspace
         env = {**self.s3.env, "BENCH_BIND_HOST": "127.0.0.1"}
         command = "env " + " ".join(shlex.quote(k + "=" + v) for k, v in env.items())
         command += " /opt/bench-venv/bin/python -u /opt/bench/run_sandbox_workload.py"
-        launcher = (
-            "import subprocess;from pathlib import Path;f=open('/var/log/bench/guest.log','ab');"
-            "p=subprocess.Popen("
-            + repr(["bash", "-lc", command])
-            + ",stdout=f,stderr=f,stdin=subprocess.DEVNULL,start_new_session=True);print(p.pid)"
-        )
-        await self.exec(sid, "$(command -v sudo || true) " + python(launcher), 30)
-        await self.exec(
-            sid,
-            "$(command -v sudo || true) "
-            + python(
-                "import subprocess;f=open('/var/log/bench/recorder.log','ab');"
-                "subprocess.Popen(['python3','/opt/bench/record_resource_usage.py'],stdout=f,stderr=f,stdin=subprocess.DEVNULL,start_new_session=True)"
+        for service, service_command, log_path in [
+            ("guest", command, "/var/log/bench/guest.log"),
+            (
+                "recorder",
+                "python3 /opt/bench/record_resource_usage.py",
+                "/var/log/bench/recorder.log",
             ),
-            30,
-        )
+        ]:
+            pid = await self.p.start_service(sid, service_command, log_path)
+            self.e.log("service_started", id=sid, service=service, pid=pid)
         for attempt in range(30):
             try:
                 await self.guest(sid, {"op": "progress"}, 10)
@@ -425,16 +422,23 @@ $SUDO chmod 1777 /workspace
         raise TimeoutError("Guest service did not start")
 
     async def guest(self, sid, payload, timeout=600):
+        # A wedged FUSE read can delay Python's signal handler in the guest.
+        # Bound the observing client as well, without restarting the saved mount.
+        if payload.get("op") == "state":
+            timeout = min(timeout, 45)
         # A native exec reaches a loopback HTTP service. No public guest endpoint,
         # provider key, or provider admin credentials are installed in the VM.
         code = (
-            "import urllib.request,json;req=urllib.request.Request('http://127.0.0.1:8123/',data="
+            "import urllib.request,json,base64;req=urllib.request.Request('http://127.0.0.1:8123/',data="
             + repr(json.dumps(payload).encode())
-            + ",headers={'Content-Type':'application/json'});print(urllib.request.urlopen(req,timeout="
+            + ",headers={'Content-Type':'application/json'});print(base64.b64encode(urllib.request.urlopen(req,timeout="
             + str(timeout)
-            + ").read().decode())"
+            + ").read()).decode())"
         )
-        data = json.loads(await self.exec(sid, python(code), timeout + 10))
+        # Some native exec APIs insert newlines between output chunks. Base64
+        # tolerates that framing without changing JSON strings or their bytes.
+        output = await self.exec(sid, python(code), timeout + 10)
+        data = json.loads(base64.b64decode(output))
         if not data["ok"]:
             raise GuestFailure(data)
         return data["result"]
@@ -513,7 +517,9 @@ $SUDO chmod 1777 /workspace
         self.e.state["trials"].append(row)
         self.e.save()
         async with self.slots:
-            name = f"sb-{self.run_id}-{case}-{index}"
+            # Keep source names within Beam's 24-character limit, including N=1,000.
+            label = {"source-disk": "sd", "source-memory": "sm"}.get(case, case[0])
+            name = f"sb-{self.run_id}-{label}-{index}"
             row.update(
                 name=name, status="dispatched", t0=time.monotonic(), dispatched_at=now()
             )
@@ -566,6 +572,11 @@ $SUDO chmod 1777 /workspace
                         disk_expected or (ref or {}).get("disk_expected"),
                     )
                 row["status"] = "passed"
+            except asyncio.CancelledError:
+                row.update(
+                    status="interrupted", error="Controller interrupted this trial"
+                )
+                raise
             except Exception as exc:
                 row.update(status="failed", error=type(exc).__name__ + ": " + str(exc))
                 if isinstance(exc, GuestFailure):
@@ -606,9 +617,20 @@ $SUDO chmod 1777 /workspace
             if "activity" in row:
                 return
             try:
+                drain_started = time.monotonic()
+                deadline = drain_started + 180
                 value = (await self.guest(row["sandbox_id"], {"op": "progress"}))[
                     "activity"
                 ]
+                while not value["done"] and time.monotonic() < deadline:
+                    await asyncio.sleep(0.5)
+                    value = (
+                        await self.guest(
+                            row["sandbox_id"],
+                            {"op": "progress"},
+                            min(30, max(1, deadline - time.monotonic())),
+                        )
+                    )["activity"]
                 events = value["events"]
                 for event in events:
                     if event.get("s3_write"):
@@ -620,9 +642,12 @@ $SUDO chmod 1777 /workspace
                         e.get("passed")
                         and e.get("external_s3", {}).get("passed")
                         and e["start_lateness_s"] <= 1
+                        and datetime.fromisoformat(e["at"]).timestamp() <= epoch + 61
                         for e in events
                     ),
                     "window_start": epoch,
+                    "window_end": epoch + 60,
+                    "drain_wait_s": time.monotonic() - drain_started,
                     "events": events,
                     "done": value["done"],
                 }
@@ -876,6 +901,7 @@ def summarize(state):
                 r.get("activity", {}).get("passed", False) for r in rows
             ),
             "failed": sum(r["status"] == "failed" for r in rows),
+            "interrupted": sum(r["status"] == "interrupted" for r in rows),
             "successful_workflow_s": {
                 "n": len(values),
                 "mean": statistics.mean(values) if values else None,
