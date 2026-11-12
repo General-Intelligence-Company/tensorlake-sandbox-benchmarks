@@ -517,7 +517,9 @@ $SUDO chmod 1777 /workspace
         self.e.state["trials"].append(row)
         self.e.save()
         async with self.slots:
-            name = f"sb-{self.run_id}-{case}-{index}"
+            # Keep source names within Beam's 24-character limit, including N=1,000.
+            label = {"source-disk": "sd", "source-memory": "sm"}.get(case, case[0])
+            name = f"sb-{self.run_id}-{label}-{index}"
             row.update(
                 name=name, status="dispatched", t0=time.monotonic(), dispatched_at=now()
             )

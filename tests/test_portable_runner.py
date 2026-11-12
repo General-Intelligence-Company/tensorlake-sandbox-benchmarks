@@ -625,3 +625,14 @@ async def test_modal_snapshot_requests_use_sdk_event_loop(monkeypatch):
 
     monkeypatch.setattr(p, "_image_request", missing)
     assert await p.snapshot_absent({"id": "im-test", "kind": "disk"})
+
+
+async def test_generated_names_fit_provider_limits_and_distinguish_sources(tmp_path):
+    c = config(tmp_path, run_id="123456789abc")
+    e, p = evidence(tmp_path, c), FakeProvider()
+    r = Runner(c, p, e)
+    for case, index in [("fresh", 1000), ("source-disk", 0), ("source-memory", 0)]:
+        await r.trial(case, index)
+    assert len(set(p.creates)) == 3
+    assert all(len(name) <= 24 for name in p.creates)
+    await r.cleanup()
