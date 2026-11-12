@@ -31,8 +31,8 @@
     "sandbox_bench/__init__.py": "7861300e148959da570cd348089880f4ddd32859b4f6b77db9441669de0ef5c3",
     "sandbox_bench/cli.py": "cb1157bed289ace3f13146d1acab55c769e80f5480835e5a48689e62926801d6",
     "sandbox_bench/providers.py": "43f5d169cec0d0ce628422d7f9079a4fa0f63eba3cefeda73f7e3d8289b5b950",
-    "sandbox_bench/runner.py": "9fbebeba09c5d3502945829e6c2ff50f3585c9e1edb71f89e391c0640c8207d3",
-    "tests/test_portable_runner.py": "6451b593027f6391f6d1fa62fe22f61ec59f51a5c0e408e45b3fbcc10fd1bbac",
+    "sandbox_bench/runner.py": "2d75b694dee1d400675c20eb49a27d84a2bbb238e3328e0d519c33168767fde5",
+    "tests/test_portable_runner.py": "8a2cf55e71d32783b6b9bc4b98a8d6002d0e3f6774b0b4a18bacd5b006676461",
     "uv.lock": "f5054cad3cda393dd94d22df69a9e16ea1626aab52a5c3dadda64c1171f93bf5"
   }
 }

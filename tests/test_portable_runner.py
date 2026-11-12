@@ -581,3 +581,20 @@ async def test_guest_rpc_survives_native_exec_chunk_boundaries(tmp_path, monkeyp
 
     monkeypatch.setattr(r, "exec", chunked_exec)
     assert await r.guest("vm", {"op": "progress"}) == result
+
+
+async def test_saved_state_rpc_has_client_deadline_when_guest_cannot_interrupt(
+    tmp_path, monkeypatch
+):
+    import base64
+
+    c = config(tmp_path)
+    r = Runner(c, FakeProvider(), evidence(tmp_path, c))
+
+    async def observe(sid, command, timeout):
+        assert "timeout=45" in command
+        assert timeout == 55
+        return base64.b64encode(b'{"ok":true,"result":{"state":{}}}').decode()
+
+    monkeypatch.setattr(r, "exec", observe)
+    assert await r.guest("vm", {"op": "state"}) == {"state": {}}

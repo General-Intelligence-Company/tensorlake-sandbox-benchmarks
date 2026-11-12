@@ -422,6 +422,10 @@ $SUDO chmod 1777 /workspace
         raise TimeoutError("Guest service did not start")
 
     async def guest(self, sid, payload, timeout=600):
+        # A wedged FUSE read can delay Python's signal handler in the guest.
+        # Bound the observing client as well, without restarting the saved mount.
+        if payload.get("op") == "state":
+            timeout = min(timeout, 45)
         # A native exec reaches a loopback HTTP service. No public guest endpoint,
         # provider key, or provider admin credentials are installed in the VM.
         code = (
