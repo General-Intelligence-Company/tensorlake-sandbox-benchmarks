@@ -283,8 +283,7 @@ async def test_cleanup_does_not_replay_unconfirmed_delete(tmp_path):
 
 
 async def test_modal_disk_cleanup_uses_existing_rpc_messages(monkeypatch):
-    from grpclib.const import Status
-    from grpclib.exceptions import GRPCError
+    from modal.exception import NotFoundError
     from modal.client import _Client
 
     from sandbox_bench.providers import Modal
@@ -293,7 +292,7 @@ async def test_modal_disk_cleanup_uses_existing_rpc_messages(monkeypatch):
 
     async def lookup(req):
         calls.append(("lookup", req.image_id))
-        raise GRPCError(Status.NOT_FOUND, "gone")
+        raise NotFoundError("gone")
 
     async def delete(req):
         calls.append(("delete", req.image_id))
@@ -598,3 +597,31 @@ async def test_saved_state_rpc_has_client_deadline_when_guest_cannot_interrupt(
 
     monkeypatch.setattr(r, "exec", observe)
     assert await r.guest("vm", {"op": "state"}) == {"state": {}}
+
+
+async def test_modal_snapshot_requests_use_sdk_event_loop(monkeypatch):
+    from modal.client import _Client
+    from sandbox_bench.providers import Modal
+
+    main_loop = asyncio.get_running_loop()
+    calls = []
+
+    async def rpc(request):
+        assert asyncio.get_running_loop() is not main_loop
+        calls.append(request.image_id)
+
+    async def client():
+        return SimpleNamespace(_stub=SimpleNamespace(ImageFromId=rpc, ImageDelete=rpc))
+
+    monkeypatch.setattr(_Client, "from_env", client)
+    p = object.__new__(Modal)
+    assert not await p.snapshot_absent({"id": "im-test", "kind": "disk"})
+    await p.delete_snapshot({"id": "im-test", "kind": "disk"})
+    assert calls == ["im-test", "im-test"]
+    from modal.exception import NotFoundError
+
+    async def missing(*args):
+        raise NotFoundError("deleted")
+
+    monkeypatch.setattr(p, "_image_request", missing)
+    assert await p.snapshot_absent({"id": "im-test", "kind": "disk"})

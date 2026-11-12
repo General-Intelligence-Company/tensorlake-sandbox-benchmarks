@@ -319,37 +319,40 @@ class Modal(Provider):
             )
         return {"id": snap.object_id, "kind": kind}
 
+    async def _image_request(self, method, image_id):
+        from modal._utils.async_utils import synchronizer
+        from modal.client import _Client
+        from modal_proto import api_pb2
+
+        # The shared Modal client belongs to its SDK event loop, not ours.
+        @synchronizer.create_blocking
+        async def request():
+            client = await _Client.from_env()
+            return await getattr(client._stub, method)(
+                getattr(api_pb2, method + "Request")(image_id=image_id)
+            )
+
+        return await request.aio()
+
     async def delete_snapshot(self, ref):
         if ref["kind"] == "memory":
             raise ProviderError(
                 "Modal SDK exposes no memory snapshot deletion API; snapshot expires after seven days"
             )
-        from modal.client import _Client
-        from modal_proto import api_pb2
-
-        client = await _Client.from_env()
-        await client._stub.ImageDelete(api_pb2.ImageDeleteRequest(image_id=ref["id"]))
+        await self._image_request("ImageDelete", ref["id"])
 
     async def snapshot_absent(self, ref):
         if ref["kind"] == "memory":
             raise ProviderError(
                 "Modal memory snapshot expiry requires manual verification"
             )
-        from grpclib.const import Status
-        from grpclib.exceptions import GRPCError
-        from modal.client import _Client
-        from modal_proto import api_pb2
+        from modal.exception import NotFoundError
 
-        client = await _Client.from_env()
         try:
-            await client._stub.ImageFromId(
-                api_pb2.ImageFromIdRequest(image_id=ref["id"])
-            )
+            await self._image_request("ImageFromId", ref["id"])
             return False
-        except GRPCError as exc:
-            if exc.status == Status.NOT_FOUND:
-                return True
-            raise
+        except NotFoundError:
+            return True
 
 
 class Blaxel(Provider):
