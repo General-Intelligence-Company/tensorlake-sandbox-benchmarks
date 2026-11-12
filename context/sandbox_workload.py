@@ -135,7 +135,8 @@ class SandboxWorkload:
         assert path.read_bytes() == payload
         local_readback_s = time.monotonic() - read_started
         return {
-            "key": self.config["s3_prefixes"][self.config.get("provider", "tensorlake")] + rel,
+            "key": self.config["s3_prefixes"][self.config.get("provider", "tensorlake")]
+            + rel,
             "sha256": sha256(payload),
             "bytes": len(payload),
             "payload_size_bytes": self.config["write_payload_bytes"],
@@ -270,11 +271,15 @@ class SandboxWorkload:
         t = time.monotonic()
         if self.is_s3_mounted():
             return {"already_mounted": True, "duration_s": time.monotonic() - t}
+        # Disk snapshots may omit mount-point directories along with the mount.
+        Path("/mnt/library").mkdir(parents=True, exist_ok=True)
         args = [
             "s3fs",
             self.config["bucket"]
             + ":/"
-            + self.config["s3_prefixes"][self.config.get("provider", "tensorlake")].rstrip("/"),
+            + self.config["s3_prefixes"][
+                self.config.get("provider", "tensorlake")
+            ].rstrip("/"),
             "/mnt/library",
             "-f",
             "-o",
@@ -290,10 +295,17 @@ class SandboxWorkload:
             "-o",
             "gid=1000",
             "-o",
-            "compat_dir",
-            "-o",
             "stat_cache_expire=1",
         ]
+        # s3fs 1.93 needs this for implicit S3 directories; older builds reject it.
+        help_text = subprocess.run(
+            ["s3fs", "--help"], capture_output=True, text=True, check=True
+        ).stdout
+        if any(
+            line.strip().split(" ", 1)[0] == "compat_dir"
+            for line in help_text.splitlines()
+        ):
+            args.extend(["-o", "compat_dir"])
         log = (self.evidence_dir / "s3fs.log").open("a")
         self.mount_process = subprocess.Popen(args, stdout=log, stderr=log)
         while time.monotonic() - t < 180:
@@ -433,6 +445,14 @@ class SandboxWorkload:
 
     # Observe saved state without navigation, repairs or restarts; the controller compares this before editing.
     def capture_session_state(self):
+        self.set_current_step("saved_state")
+        signal.alarm(30)
+        try:
+            return self._capture_session_state()
+        finally:
+            signal.alarm(0)
+
+    def _capture_session_state(self):
         assert self.page is not None and self.app_process is not None
         assert self.app_process.poll() is None
         assert self.marker in self.read_app_response()
@@ -486,12 +506,13 @@ class SandboxWorkload:
             [
                 "git",
                 "clone",
-                "--branch",
-                "shared-pinned",
                 "/opt/bench/shared-app.bundle",
                 str(self.app_dir),
             ],
             timeout=600,
+        )
+        self.run_command(
+            ["git", "checkout", "--detach", self.config["commit"]], cwd=self.app_dir
         )
         head = self.run_command(["git", "rev-parse", "HEAD"], cwd=self.app_dir)
         assert head == self.config["commit"]

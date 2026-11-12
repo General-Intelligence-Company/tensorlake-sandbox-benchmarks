@@ -10,13 +10,13 @@
     "context/manifest.example.json": "1961bf042f785752aecf47d327c8f130a1222a1d0dc2c74438dd582f66d3cc29",
     "context/record_resource_usage.py": "3224922b0435e31bb20cfafeffc75404a34339937958ebd95e1e8cfddadc189b",
     "context/run_sandbox_workload.py": "283a09294c4df405994bf5064b1eeee6a3ebf0effbc807077682b02cc67fd91f",
-    "context/sandbox_workload.py": "13b25baee07fbfc8168729b2d7eabbc74fa4842470de5083b6dada772502e1f7",
+    "context/sandbox_workload.py": "a806511a1f3166a50c468361fc372215066a2a6a5be28a3cdf1d3916e2776dda",
     "context/shared-app.bundle": "970712e622cf310dd1dbaea22a5d1c416dcf51e6f455c6c47b58f6b4dc6ad696",
     "controller/check_s3_read_retries.py": "12dc9442568135aeb5a102103042c55e8de878ea6db093bfa182427054217b7b",
     "controller/run_benchmark.py": "021b0f34ced7bedb45454fab3d7b011c20e187bc03e3b6540811e0afa33fbde7",
     "controller/summarize_results.py": "92e7fd0cba23102d85bd3e45ac44b21afe2e3f345b0c220fd047c54b2cb2ca41",
     "controller/verify_saved_activity.py": "a0d5567a1ebeff5acf2f714b3a13c6c5acc46a6cc125d6bb522f175f0e50040f",
-    "docs/providers.md": "fa8251c7e35dcae2fb62511b88301d579a557c37088721419f4bd8b4b9a1f862",
+    "docs/providers.md": "c755154607640e6def701f1e620280748fc246a012aabcd04590902eb8a991ec",
     "docs/tensorlake-reference.md": "2ac7db88171b5ac81a1d4eca491f4edfa4506e57f5c025ecd549f8c304037fb3",
     "fixture-app/.gitignore": "9faed4b4c07e86ce1ec5ece6cf508f9b0bd2898d1b6f959149aee5a5342d36fa",
     "fixture-app/api/index.mjs": "4fde440764bc27896849bcaa7b81fc24e7e0763f20d44794ce0c9f787bf7ff0f",
@@ -30,9 +30,9 @@
     "pyproject.toml": "bdfd4e78fb2fe50c45cc430095f9a4fe4af65470d55fb75616bfd2f2deba52ba",
     "sandbox_bench/__init__.py": "7861300e148959da570cd348089880f4ddd32859b4f6b77db9441669de0ef5c3",
     "sandbox_bench/cli.py": "cb1157bed289ace3f13146d1acab55c769e80f5480835e5a48689e62926801d6",
-    "sandbox_bench/providers.py": "c6d7798512d3176595bbcecb224909bed0302331ca0233f3324f8a74aab72a1b",
-    "sandbox_bench/runner.py": "fb8035f55ac7dd02ab932e4097e1ae95a18fb576ec17e4626cb4f4c72548ea0f",
-    "tests/test_portable_runner.py": "12d28b7f3cdafdd5cefc186ce65eaac83acd6ec0fc8195cc155fc9787c595d56",
+    "sandbox_bench/providers.py": "43f5d169cec0d0ce628422d7f9079a4fa0f63eba3cefeda73f7e3d8289b5b950",
+    "sandbox_bench/runner.py": "9fbebeba09c5d3502945829e6c2ff50f3585c9e1edb71f89e391c0640c8207d3",
+    "tests/test_portable_runner.py": "6451b593027f6391f6d1fa62fe22f61ec59f51a5c0e408e45b3fbcc10fd1bbac",
     "uv.lock": "f5054cad3cda393dd94d22df69a9e16ea1626aab52a5c3dadda64c1171f93bf5"
   }
 }

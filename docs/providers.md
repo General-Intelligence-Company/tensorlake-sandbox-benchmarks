@@ -8,7 +8,7 @@ The portable runner uses the integrations below. These adapters have offline con
 | Modal | `modal` | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | Fresh, disk fork, memory fork |
 | Boat | None | `BOAT_API_KEY`, `BOAT_ORG` | Fresh, disk fork, same-ID disk resume |
 | Blaxel | `blaxel` | `BL_API_KEY`, `BL_WORKSPACE` | Fresh, memory fork |
-| Beam VMs | `beam` | `BEAM_TOKEN` | Fresh, disk fork, same-ID memory-preserving resume |
+| Beam VMs | `beam` | `BEAM_API_KEY` | Fresh, disk fork, same-ID memory-preserving resume |
 | exe.dev | None | `EXE_API_KEY` | Fresh, disk copy, same-ID resume |
 
 This table describes **what this runner implements**, not every feature sold by a provider. An unsupported requested case is rejected before any API calls. We do not silently replace a memory fork with a disk copy.

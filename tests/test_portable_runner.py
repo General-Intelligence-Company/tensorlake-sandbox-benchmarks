@@ -329,3 +329,255 @@ async def test_readiness_stops_on_blaxel_style_forbidden(tmp_path):
     with pytest.raises(Forbidden):
         await Runner(c, p, e).terminal("vm", {"t0": time.monotonic()})
     assert len(calls) == 1
+
+
+def test_shared_bundle_clones_its_pinned_commit_without_private_branch(tmp_path):
+    import subprocess
+    import importlib.util
+    from sandbox_bench.runner import assets
+
+    spec = importlib.util.spec_from_file_location(
+        "guest_workload", assets() / "sandbox_workload.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    SandboxWorkload = module.SandboxWorkload
+    worker = object.__new__(SandboxWorkload)
+    worker.config = json.loads((assets() / "manifest.example.json").read_text())
+    worker.app_dir = tmp_path / "app"
+
+    def command(args, cwd=None, timeout=60):
+        args = [
+            str(assets() / "shared-app.bundle")
+            if a == "/opt/bench/shared-app.bundle"
+            else a
+            for a in args
+        ]
+        return subprocess.run(
+            args, cwd=cwd, timeout=timeout, capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    worker.run_command = command
+    result = worker.clone_test_repository()
+    assert result["commit"] == worker.config["commit"]
+    assert (worker.app_dir / "api/index.mjs").exists()
+
+
+async def test_cancelled_trial_is_visible_and_its_vm_is_cleaned(tmp_path):
+    c = config(tmp_path, count=1, batch_size=1, concurrency=1)
+    e, p = evidence(tmp_path, c), FakeProvider()
+    started = asyncio.Event()
+
+    async def paused(*args, **kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    p.exec = paused
+    task = asyncio.create_task(Runner(c, p, e).run())
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert e.state["trials"][0]["status"] == "interrupted"
+    assert not p.active
+    assert summarize(e.state)["cases"]["fresh"]["interrupted"] == 1
+
+
+async def test_activity_drains_late_final_check_without_turning_it_into_a_pass(
+    tmp_path, monkeypatch
+):
+    from sandbox_bench import runner
+    from datetime import datetime, timezone
+
+    c = config(tmp_path, suite="workflow")
+    e = evidence(tmp_path, c)
+    r = Runner(c, FakeProvider(), e, SimpleNamespace(verify=None))
+    calls = []
+    events = [
+        {
+            "passed": True,
+            "s3_write": {},
+            "external_s3": {"passed": True},
+            "start_lateness_s": 0,
+            "at": datetime.fromtimestamp(1006 + i * 5, timezone.utc).isoformat(),
+        }
+        for i in range(12)
+    ]
+    events[-1]["at"] = datetime.fromtimestamp(1070, timezone.utc).isoformat()
+
+    async def guest(sid, payload, timeout=600):
+        calls.append(payload["op"])
+        if payload["op"] == "activity":
+            return {}
+        done = calls.count("progress") > 1
+        return {"activity": {"events": events if done else events[:-1], "done": done}}
+
+    async def sleep(_):
+        return
+
+    monkeypatch.setattr(runner.time, "time", lambda: 1000)
+    monkeypatch.setattr(runner.asyncio, "sleep", sleep)
+    r.guest = guest
+    row = {"status": "passed", "sandbox_id": "vm"}
+    await r.activity([row])
+    assert calls == ["activity", "progress", "progress"]
+    assert len(row["activity"]["events"]) == 12
+    assert row["activity"]["done"] and not row["activity"]["passed"]
+
+
+@pytest.mark.parametrize(
+    "help_text,compat",
+    [
+        ("   compat_dir (enable support)\n", True),
+        ("   notsup_compat_dir (disable support)\n", False),
+    ],
+)
+def test_disk_restore_recreates_mount_directory(
+    tmp_path, monkeypatch, help_text, compat
+):
+    import importlib.util
+    from sandbox_bench.runner import assets
+
+    spec = importlib.util.spec_from_file_location(
+        "guest_mount_test", assets() / "sandbox_workload.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    worker = object.__new__(module.SandboxWorkload)
+    worker.config = {
+        "bucket": "bucket",
+        "provider": "boat",
+        "s3_prefixes": {"boat": "prefix/"},
+        "region": "us-east-1",
+    }
+    worker.evidence_dir = tmp_path
+    mount = tmp_path / "mount"
+    real_path = module.Path
+    monkeypatch.setattr(
+        module, "Path", lambda p: mount if str(p) == "/mnt/library" else real_path(p)
+    )
+    observations = iter([False, True])
+    worker.is_s3_mounted = lambda: next(observations)
+    monkeypatch.setattr(
+        module.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout=help_text)
+    )
+
+    def start(*args, **kwargs):
+        assert mount.is_dir()
+        assert ("compat_dir" in args[0]) is compat
+        return SimpleNamespace(pid=10, poll=lambda: None)
+
+    monkeypatch.setattr(module.subprocess, "Popen", start)
+    assert worker.ensure_s3_mount()["pid"] == 10
+
+
+async def test_tensorlake_service_uses_native_process_lifetime():
+    from unittest.mock import AsyncMock
+
+    p = object.__new__(Tensorlake)
+    start = AsyncMock(return_value=SimpleNamespace(pid=246))
+    command_run = AsyncMock(side_effect=AssertionError("short-lived exec used"))
+    p.handles = {"sandbox": SimpleNamespace(start_process=start, run=command_run)}
+    assert (
+        await p.start_service("sandbox", "python worker.py", "/var/log/worker.log")
+        == 246
+    )
+    args, kwargs = start.call_args
+    assert args == ("bash", ["-lc", "python worker.py >> /var/log/worker.log 2>&1"])
+    assert "timeout" not in kwargs and kwargs["restart"] == {"policy": "never"}
+    command_run.assert_not_called()
+
+
+def test_aws_redaction_preserves_region_for_later_cleanup(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    import boto3
+
+    c = config(tmp_path, suite="workflow")
+    c["s3"] = {
+        "profile": "temporary-role",
+        "region": "us-east-1",
+        "expected_account": "123456789012",
+        "bucket": "test-bucket",
+        "prefix": "test/",
+        "seed": "seed.txt",
+    }
+    e = evidence(tmp_path, c)
+    frozen = SimpleNamespace(
+        access_key="test-access-key",
+        secret_key="test-secret-key",
+        token="test-session-token",
+    )
+    credentials = SimpleNamespace(
+        _expiry_time=datetime.now(timezone.utc) + timedelta(hours=1),
+        get_frozen_credentials=lambda: frozen,
+    )
+    s3 = SimpleNamespace(
+        get_object=lambda **kw: {"Body": io.BytesIO(b"seed")},
+        generate_presigned_url=lambda *a, **kw: (
+            "https://example.com/seed?signature=test"
+        ),
+    )
+    session = SimpleNamespace(
+        get_credentials=lambda: credentials,
+        client=lambda name, **kw: (
+            SimpleNamespace(get_caller_identity=lambda: {"Account": "123456789012"})
+            if name == "sts"
+            else s3
+        ),
+    )
+    monkeypatch.setattr(boto3, "Session", lambda **kw: session)
+    fixture = S3Fixture(c["s3"], e)
+    e.state["guest_environment"] = fixture.env
+    e.save()
+    saved = json.loads((e.path / "run.json").read_text())
+    assert saved["config"]["s3"]["region"] == "us-east-1"
+    assert saved["guest_environment"]["AWS_DEFAULT_REGION"] == "us-east-1"
+    for key in [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "N100_PROBE_URL",
+    ]:
+        assert saved["guest_environment"][key] == "[redacted]"
+
+
+def test_saved_state_check_deadline_clears_after_failure(monkeypatch):
+    import importlib.util
+    from sandbox_bench.runner import assets
+
+    spec = importlib.util.spec_from_file_location(
+        "guest_deadline_test", assets() / "sandbox_workload.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    worker = object.__new__(module.SandboxWorkload)
+    worker.set_current_step = lambda name: None
+    alarms = []
+    monkeypatch.setattr(module.signal, "alarm", alarms.append)
+
+    def blocked_mount():
+        assert alarms[-1] == 30
+        raise TimeoutError("preserved FUSE read stalled")
+
+    worker._capture_session_state = blocked_mount
+    with pytest.raises(TimeoutError, match="preserved FUSE"):
+        worker.capture_session_state()
+    assert alarms == [30, 0]
+
+
+async def test_guest_rpc_survives_native_exec_chunk_boundaries(tmp_path, monkeypatch):
+    import base64
+
+    c = config(tmp_path)
+    r = Runner(c, FakeProvider(), evidence(tmp_path, c))
+    result = {"activity": [{"detail": "x" * 20000}]}
+    payload = base64.b64encode(
+        json.dumps({"ok": True, "result": result}).encode()
+    ).decode()
+
+    async def chunked_exec(sid, command, timeout):
+        assert "b64encode" in command
+        return "\n".join(payload[i : i + 16384] for i in range(0, len(payload), 16384))
+
+    monkeypatch.setattr(r, "exec", chunked_exec)
+    assert await r.guest("vm", {"op": "progress"}) == result

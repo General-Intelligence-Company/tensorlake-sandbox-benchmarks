@@ -46,7 +46,7 @@ SPECS = {
         "Snapshots capture RAM and filesystem and require preview access. No disk-only fork or explicit pause test in this adapter.",
     ),
     "beam": ProviderSpec(
-        ("BEAM_TOKEN",),
+        ("BEAM_API_KEY",),
         "beam",
         ("fresh", "disk", "resume"),
         "Uses Beam VMs, not Beam serverless Sandboxes. Disk snapshots and same-ID memory-preserving pause/resume.",
@@ -88,6 +88,20 @@ class Provider:
     async def prepare(self):
         """Optional image build before measured VM creation."""
         return None
+
+    async def start_service(self, sid, command, log_path):
+        launcher = (
+            "import subprocess;f=open(" + repr(log_path) + ", 'ab');"
+            "p=subprocess.Popen("
+            + repr(["bash", "-lc", command])
+            + ",stdout=f,stderr=f,stdin=subprocess.DEVNULL,start_new_session=True);print(p.pid)"
+        )
+        result = await self.exec(
+            sid, "$(command -v sudo || true) python3 -c " + shlex.quote(launcher), 30
+        )
+        if result.exit_code != 0:
+            raise ProviderError("Service launch failed: " + result.stderr[-1000:])
+        return int(result.stdout.strip())
 
     async def pause(self, sid):
         raise NotImplementedError
@@ -142,6 +156,18 @@ class Tensorlake(Provider):
             "bash", ["-lc", command], timeout=timeout, user="root"
         )
         return Command(r.stdout, r.stderr, r.exit_code)
+
+    async def start_service(self, sid, command, log_path):
+        if sid not in self.handles:
+            self.handles[sid] = await self.client.connect(sid, request_timeout=2500)
+        # Native process ownership keeps this service beyond a short exec deadline.
+        process = await self.handles[sid].start_process(
+            "bash",
+            ["-lc", command + " >> " + shlex.quote(log_path) + " 2>&1"],
+            user="root",
+            restart={"policy": "never"},
+        )
+        return process.pid
 
     async def inventory(self):
         return [
@@ -617,7 +643,7 @@ class Beam(Provider):
 
         self.VM = VM
         self.context = ConfigContext(
-            token=os.environ["BEAM_TOKEN"],
+            token=os.environ["BEAM_API_KEY"],
             gateway_host="gateway.beam.cloud",
             gateway_port=443,
             api_url="https://app.beam.cloud",
