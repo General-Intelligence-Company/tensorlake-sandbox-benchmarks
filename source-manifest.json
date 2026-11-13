@@ -32,8 +32,8 @@
     "pyproject.toml": "bdfd4e78fb2fe50c45cc430095f9a4fe4af65470d55fb75616bfd2f2deba52ba",
     "sandbox_bench/__init__.py": "7861300e148959da570cd348089880f4ddd32859b4f6b77db9441669de0ef5c3",
     "sandbox_bench/cli.py": "9be60ef5ef552b7801f9e4b181c157a67620ee1dce119cc3f817d6a9684a43f4",
-    "sandbox_bench/providers.py": "b5eadd9807d7a898a48c14fc4dfc28a189fa44ae49a7953a0e49775fa92b23bd",
-    "sandbox_bench/runner.py": "d74a901c9c438678901496336ce864911374f46690463066ac5c6ca0a83f15f9",
+    "sandbox_bench/providers.py": "082929995f0d64cfbabe1b7982808b8ea222cd20b7923a693ed01ffe770114c9",
+    "sandbox_bench/runner.py": "e92624051aaf994da2335046242e5e23c700283926c0d65f2e05f0ff9b6ba9bc",
     "sandbox_bench/tools.py": "bb602c86344ebef8283fd172848746695da427fc02ba99ef9e2c139b4f32864b",
     "tests/test_portable_runner.py": "7aaa053201d9d264e91050b228f430075d54638eafe6a6da579173a473f0f72f",
     "uv.lock": "f5054cad3cda393dd94d22df69a9e16ea1626aab52a5c3dadda64c1171f93bf5"

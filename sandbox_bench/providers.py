@@ -5,7 +5,7 @@ import base64
 import os
 import shlex
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
 
@@ -71,6 +71,7 @@ class Command:
     stdout: str
     stderr: str = ""
     exit_code: int = 0
+    observation: dict = field(default_factory=dict)
 
 
 class Provider:
@@ -560,7 +561,9 @@ class Boat(Provider):
     async def tools_snapshot(self, sid, name):
         listing = await self.request("GET", "/named-snapshots")
         if listing["allowance"]["free"] < 1:
-            raise ProviderError("No free Boat named snapshot allowance; preparation held")
+            raise ProviderError(
+                "No free Boat named snapshot allowance; preparation held"
+            )
         await self.pause(sid)
         await self.request("POST", "/named-snapshots", {"sandboxId": sid, "name": name})
         deadline = time.monotonic() + 300
@@ -839,6 +842,9 @@ class Beam(Provider):
             from beta9.clients.pod import (
                 PodSandboxConnectRequest,
                 PodSandboxExecRequest,
+                PodSandboxStatusRequest,
+                PodSandboxStderrRequest,
+                PodSandboxStdoutRequest,
                 PodServiceStub,
             )
 
@@ -871,10 +877,46 @@ class Beam(Provider):
                 deadline=timeout + 10,
             )
             if not r.done:
-                raise ProviderError(
-                    "Beam blocking exec returned without completion; command not replayed"
-                )
-            return Command(r.stdout, r.stderr, r.exit_code)
+                observations = []
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    sent = time.monotonic()
+                    status = rpc(
+                        "sandbox_status",
+                        PodSandboxStatusRequest(container_id=cid, pid=r.pid),
+                    )
+                    observations.append(
+                        {
+                            "sent": sent,
+                            "received": time.monotonic(),
+                            "exit_code": status.exit_code,
+                        }
+                    )
+                    if status.exit_code >= 0:
+                        out = rpc(
+                            "sandbox_stdout",
+                            PodSandboxStdoutRequest(container_id=cid, pid=r.pid),
+                        )
+                        err = rpc(
+                            "sandbox_stderr",
+                            PodSandboxStderrRequest(container_id=cid, pid=r.pid),
+                        )
+                        return Command(
+                            r.stdout + out.stdout,
+                            r.stderr + err.stderr,
+                            status.exit_code,
+                            {
+                                "mode": "native wait then same-PID observation",
+                                "pid": r.pid,
+                                "poll_interval_s": 0.1,
+                                "polls": observations,
+                            },
+                        )
+                    time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+                raise TimeoutError("Beam process did not finish; command not replayed")
+            return Command(
+                r.stdout, r.stderr, r.exit_code, {"mode": "native wait", "polls": []}
+            )
 
         return await asyncio.to_thread(run)
 

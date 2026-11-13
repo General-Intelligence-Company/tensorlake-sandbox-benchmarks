@@ -357,6 +357,7 @@ class Runner:
                 exit_code=r.exit_code,
                 stdout=r.stdout[-2000:],
                 stderr=r.stderr[-2000:],
+                observation=r.observation,
             )
             if r.exit_code != 0:
                 raise ProviderError(
@@ -1076,7 +1077,7 @@ class Runner:
             "harness_setup_s": "Runtime service startup, prepared image checks, cold bootstrap when requested, and saved-state observation before workload execution.",
             "full_workflow_s": "Observed end-to-end from native dispatch through independent S3 verification, including harness setup. Never adjusted by subtracting estimated overhead.",
             "native_waits": {
-                "beam": "Blocking sandbox_exec RPC with wait=True; no command-status polling",
+                "beam": "Native wait=True first; when it returns a running PID, observe that same PID at 100 ms without replay; each observation is logged",
                 "tensorlake": "Blocking create; resume SDK polling at 100 ms",
                 "modal": "Native stream reads and process wait",
                 "boat": "Blocking command endpoint",
