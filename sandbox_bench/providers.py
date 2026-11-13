@@ -598,6 +598,8 @@ class Exe(Provider):
         )
         stdout, stderr, code = "", "", None
         for line in text.splitlines():
+            if not line.strip():
+                continue  # exe.dev sends blank keepalive lines during long commands.
             row = json.loads(line)
             stdout += base64.b64decode(row.get("stdout", "")).decode(errors="replace")
             stderr += base64.b64decode(row.get("stderr", "")).decode(errors="replace")
