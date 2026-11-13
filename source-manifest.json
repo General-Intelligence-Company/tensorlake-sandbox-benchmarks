@@ -4,7 +4,7 @@
   "fixture_commit": "a9f23fbc4ccddfd43d8a72e6b4ab5d369fd102a5",
   "files": {
     ".gitignore": "acf343401a6d551be9a42c298c265a578368a8a75a2fb4722d7493fd9b7c8a26",
-    "README.md": "f6c9e239d302c48832cb3e79c59123271fb7cea2bb424271dddebe2a9c6bf1bd",
+    "README.md": "b15ab0d21cd612d256ba829c26ed965606735fd60995c16d1d4882223f203a44",
     "check_source_integrity.py": "46503125abc4c2fe92250f3126ec081a66545817098345b76ed5fa6684c216e7",
     "context/bench-resource-recorder.service": "589711be9ea8668603ba214daa162af7f66aa44d2206e743596d55451c55319c",
     "context/manifest.example.json": "1961bf042f785752aecf47d327c8f130a1222a1d0dc2c74438dd582f66d3cc29",
@@ -17,7 +17,7 @@
     "controller/summarize_results.py": "92e7fd0cba23102d85bd3e45ac44b21afe2e3f345b0c220fd047c54b2cb2ca41",
     "controller/verify_saved_activity.py": "a0d5567a1ebeff5acf2f714b3a13c6c5acc46a6cc125d6bb522f175f0e50040f",
     "docs/live-validation-2026-11-12.md": "f8efbb4774f48873a1f7f1f42637784ff909cb1cc8e5c4512a97e6401595e3be",
-    "docs/providers.md": "d865ebc813aae55b6363b989fae3e7bc73b2b413c2369ced942d0ee52c220b13",
+    "docs/providers.md": "e6458acfb49d64706d319c29a665f43216c02f99ec8634714a47533f63fce837",
     "docs/tensorlake-reference.md": "2ac7db88171b5ac81a1d4eca491f4edfa4506e57f5c025ecd549f8c304037fb3",
     "fixture-app/.gitignore": "9faed4b4c07e86ce1ec5ece6cf508f9b0bd2898d1b6f959149aee5a5342d36fa",
     "fixture-app/api/index.mjs": "4fde440764bc27896849bcaa7b81fc24e7e0763f20d44794ce0c9f787bf7ff0f",
