@@ -59,11 +59,8 @@ class Evidence:
         self.path.mkdir(parents=True, exist_ok=state is None, mode=0o700)
         self.lock = (self.path / ".lock").open("a")
         fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        self.state = (
-            state
-            if state is not None
-            else json.loads((self.path / "run.json").read_text())
-        )
+        self.state = state if state is not None else self.read_state(self.path)
+        self.sequence = self.state.get("journal_sequence", 0)
         self.secrets = [
             v
             for k, v in os.environ.items()
@@ -76,10 +73,67 @@ class Evidence:
             text = text.replace(secret, "[redacted]")
         return re.sub(r'(https?://[^\s"?]+)\?[^\s"]+', r"\1?[redacted]", text)
 
+    @staticmethod
+    def read_state(path):
+        path = Path(path)
+        state = json.loads((path / "run.json").read_text())
+        checkpoint = state.get("journal_sequence", 0)
+        updates = [json.loads(p.read_text()) for p in (path / "updates").glob("*.json")]
+        for update in sorted(updates, key=lambda item: item["sequence"]):
+            if update["sequence"] <= checkpoint:
+                continue
+            value = update["value"]
+            kind = update["kind"]
+            rows = state["trials" if kind == "trial" else "operations"]
+            identity = (
+                lambda row: (row["case"], row["index"])
+                if kind == "trial"
+                else row["operation_id"]
+            )
+            index = next(
+                (i for i, row in enumerate(rows) if identity(row) == identity(value)),
+                None,
+            )
+            if index is None:
+                rows.append(value)
+            else:
+                rows[index] = value
+            if kind == "operation" and value["status"] == "returned":
+                if value["kind"] == "create":
+                    state["owned"].setdefault(
+                        value["result"], {"name": value["name"], "deleted": False}
+                    )
+                elif value["kind"] == "snapshot" and not any(
+                    ref["id"] == value["result"]["id"] for ref in state["snapshots"]
+                ):
+                    state["snapshots"].append(
+                        {**value["result"], "source_id": value["id"]}
+                    )
+            state["journal_sequence"] = update["sequence"]
+        return state
+
+    def write(self, path, value):
+        temp = path.with_suffix(path.suffix + ".tmp")
+        temp.write_text(self.clean(value) + "\n")
+        temp.replace(path)
+
     def save(self):
-        temp = self.path / "run.json.tmp"
-        temp.write_text(self.clean(self.state) + "\n")
-        temp.replace(self.path / "run.json")
+        # Full checkpoints run between measured phases. Dispatch writes only the
+        # changed record, so an old cohort cannot delay the next provider call.
+        self.state["journal_sequence"] = self.sequence
+        self.write(self.path / "run.json", self.state)
+
+    def save_update(self, kind, key, value):
+        self.sequence += 1
+        directory = self.path / "updates"
+        directory.mkdir(exist_ok=True)
+        self.write(
+            directory / f"{kind}-{key}.json",
+            {"sequence": self.sequence, "kind": kind, "value": value},
+        )
+
+    def save_trial(self, row):
+        self.save_update("trial", f"{row['case']}-{row['index']}", row)
 
     def log(self, kind, **value):
         with (self.path / "events.jsonl").open("a") as stream:
@@ -94,7 +148,7 @@ class Evidence:
             **context,
         }
         self.state["operations"].append(op)
-        self.save()  # An interrupted process leaves a visible, non-replayable intent.
+        self.save_update("operation", op["operation_id"], op)
         start = time.monotonic()
         try:
             value = await fn()
@@ -105,7 +159,7 @@ class Evidence:
             raise
         finally:
             op["duration_s"] = time.monotonic() - start
-            self.save()
+            self.save_update("operation", op["operation_id"], op)
 
 
 class S3Fixture:
@@ -515,7 +569,7 @@ $SUDO chmod 1777 /workspace
     ):
         row = {"case": case, "index": index, "status": "queued", "queued_at": now()}
         self.e.state["trials"].append(row)
-        self.e.save()
+        self.e.save_trial(row)
         async with self.slots:
             # Keep source names within Beam's 24-character limit, including N=1,000.
             label = {"source-disk": "sd", "source-memory": "sm"}.get(case, case[0])
@@ -523,7 +577,7 @@ $SUDO chmod 1777 /workspace
             row.update(
                 name=name, status="dispatched", t0=time.monotonic(), dispatched_at=now()
             )
-            self.e.save()
+            self.e.save_trial(row)
             try:
                 if existing:
                     sid = await self.e.mutation(
@@ -542,7 +596,7 @@ $SUDO chmod 1777 /workspace
                     if ref and sid == ref["source_id"]:
                         raise RuntimeError("Fork reused its source ID")
                 row["sandbox_id"] = sid
-                self.e.save()
+                self.e.save_trial(row)
                 await self.terminal(sid, row)
                 if self.c["suite"] == "commands":
                     # Deterministic shell/filesystem checks, separate from the
@@ -586,7 +640,7 @@ $SUDO chmod 1777 /workspace
                 row.setdefault("failure_domain", "unknown")
             finally:
                 row["duration_s"] = time.monotonic() - row["t0"]
-                self.e.save()
+                self.e.save_trial(row)
             return row
 
     async def activity(self, rows):

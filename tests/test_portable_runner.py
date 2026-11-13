@@ -131,6 +131,49 @@ def test_lock_refuses_second_controller(tmp_path):
         Evidence(e.path)
 
 
+def test_dispatch_journal_recovers_ownership_and_preserves_newer_checkpoint(tmp_path):
+    e = evidence(tmp_path, config(tmp_path))
+    e.save()
+    checkpoint = (e.path / "run.json").read_bytes()
+    operation = {
+        "operation_id": "create-1",
+        "kind": "create",
+        "status": "dispatched",
+        "name": "owned-vm",
+    }
+    e.save_update("operation", operation["operation_id"], operation)
+    assert Evidence.read_state(e.path)["operations"][0]["status"] == "dispatched"
+    operation.update(status="returned", result="owned-vm")
+    e.save_update("operation", operation["operation_id"], operation)
+    trial = {
+        "case": "fresh", "index": 1, "status": "passed", "sandbox_id": "owned-vm"
+    }
+    e.save_trial(trial)
+    snapshot = {
+        "operation_id": "snapshot-1",
+        "kind": "snapshot",
+        "status": "returned",
+        "id": "owned-vm",
+        "result": {"kind": "disk", "id": "saved-disk"},
+    }
+    e.save_update("operation", snapshot["operation_id"], snapshot)
+    assert (e.path / "run.json").read_bytes() == checkpoint
+    e.lock.close()
+
+    recovered = Evidence(e.path)
+    assert recovered.state["owned"]["owned-vm"]["deleted"] is False
+    assert recovered.state["trials"] == [trial]
+    assert recovered.state["snapshots"] == [
+        {"kind": "disk", "id": "saved-disk", "source_id": "owned-vm"}
+    ]
+    recovered.state["trials"][0]["activity"] = {"passed": True}
+    recovered.state["owned"]["owned-vm"]["deleted"] = True
+    recovered.save()
+    final = Evidence.read_state(e.path)
+    assert final["trials"][0]["activity"]["passed"] is True
+    assert final["owned"]["owned-vm"]["deleted"] is True
+
+
 def test_redaction_covers_nested_errors_and_signed_urls(tmp_path, monkeypatch):
     monkeypatch.setenv("BOAT_API_KEY", "test-secret-token")
     e = evidence(tmp_path, config(tmp_path))

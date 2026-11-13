@@ -286,7 +286,7 @@ def main():
             print(
                 json.dumps(
                     summarize(
-                        json.loads((Path(args.run_dir) / "run.json").read_text())
+                        Evidence.read_state(args.run_dir)
                     ),
                     indent=2,
                 )
