@@ -49,6 +49,8 @@ The HTTPS API key must allow `new`, `ls`, `ssh`, `cp`, `pause`, `resume`, and `r
 
 The API transports the same commands as the SSH interface. This adapter uses HTTPS, which may have different rate limits and overhead from the native SSH runs in our original evaluation. Copy is a disk test. The resume check tests the live app/browser state before changing it. [HTTPS API](https://exe.dev/docs/https-api), [command transport](https://exe.dev/docs/https-api-run-on-vm)
 
+Command responses request NDJSON, accept blank keepalive lines, and require an exit-code record. Before a disk snapshot, the adapter runs `sync` in the source VM: pausing alone can leave recent writes in RAM, while the copy reads disk blocks.
+
 ## Images and resource shapes
 
 The full workflow needs Linux with `bash`, Python, `apt-get`, root or passwordless `sudo`, and working FUSE mounts. It installs Git, Node/npm, s3fs, Playwright and Chromium when absent. A custom image must support those tools. The runner enables the optional `compat_dir` mount flag only when the installed s3fs advertises it. A FUSE permission error stays in the result; it is not converted into a successful S3 test.

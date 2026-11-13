@@ -87,12 +87,15 @@ sandbox-bench report outputs/tensorlake-<run-id>
 sandbox-bench cleanup outputs/tensorlake-<run-id>
 ```
 
-- `run.json`: configuration, every lifecycle intent/result, ownership and per-case outcomes.
+- `run.json`: a checkpoint of configuration, lifecycle intents/results, ownership and per-case outcomes.
+- `updates/`: atomic trial and operation records written during dispatch. Keep this directory with `run.json`; `report` and `cleanup` combine both when a run is active or interrupted.
 - `summary.json`: attempted, passed, failed, ineligible and unrun counts; successful workflow mean/P95; activity and cleanup coverage.
 - `events.jsonl`: command timing/outcomes and each independent S3 read attempt.
 - `artifacts/`: guest logs, resource samples and browser screenshots.
 
 Readiness milestones are cumulative from the create/fork/resume dispatch. Terminal ready means a command ran. Local-disk, S3 and full-workflow readiness are separate checkpoints. Do not add their times together. Queue waiting, activity and cleanup are separate.
+
+Dispatch writes only the changed record. Full history checkpoints happen outside measured workflows, so evidence from earlier batches does not delay later launches.
 
 **Cold tool installation is included in portable-runner workflow timing** and reported as `bootstrap_s`. Supplying an image with the tools already installed avoids that work. This differs from the original benchmark's prepared images and authenticated HTTP control transport: the portable runner uses native exec to reach a loopback guest service. Keep results from the two protocols separate.
 
