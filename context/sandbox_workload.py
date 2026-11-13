@@ -296,6 +296,14 @@ class SandboxWorkload:
             "gid=1000",
             "-o",
             "stat_cache_expire=1",
+            # A resumed mount can retain a stale S3 connection. Reconnect before
+            # the state verifier's deadline instead of waiting on TCP recovery.
+            "-o",
+            "connect_timeout=5",
+            "-o",
+            "readwrite_timeout=15",
+            "-o",
+            "retries=2",
         ]
         # s3fs 1.93 needs this for implicit S3 directories; older builds reject it.
         help_text = subprocess.run(

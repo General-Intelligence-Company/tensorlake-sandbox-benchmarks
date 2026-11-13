@@ -41,8 +41,26 @@ Earlier failed attempts remain separate from corrected attempts. No failed case 
 
 ## Remaining limits
 
-Beam's preserved S3 read stalled after resume. The terminal still worked, and a later separate read of the same object succeeded with matching bytes. The original blocked read did not recover during observation. This locates the failure in the preserved FUSE path but does not establish whether VM restoration or the S3 client caused it. The test does not remount S3 or restart the saved app/browser to turn that failure into a pass.
+At the end of the November 12 run, Beam's preserved S3 read was still unexplained: the terminal worked, and a later separate read of the same object succeeded with matching bytes, but the original read did not recover during observation. The November 13 investigation below identified a harness configuration regression. The original 0/5 result above remains unchanged.
 
 All 128 run-owned VMs across the original and corrected attempts were independently confirmed deleted or terminal. All 14 run-specific S3 prefixes were empty, and the shared seed was unchanged. Every deletable snapshot was independently confirmed absent. One Modal memory snapshot remains until its seven-day expiry because the pinned SDK has no deletion API. Beam’s cached base image remains by design.
 
 These CLI runs include cold package/browser installation. Their timings must remain separate from the historical benchmark's prepared-image timings. The Blaxel and exe.dev adapters were not run in this validation.
+
+## Beam resume investigation: 13 November 2026
+
+The portable workload omitted the s3fs connection, read/write and retry limits used by the earlier Beam harness. After pause/resume, a preserved S3 connection could stop receiving acknowledgements. The mount then waited longer than our saved-state observation allowed. A working terminal was therefore recorded as a failed resume while the verifier was blocked reading the saved S3 file.
+
+A paired live check used the same Beam image, resources, workload and state checks. Its only behavioral change was adding `connect_timeout=5`, `readwrite_timeout=15` and `retries=2` to s3fs:
+
+| Live check | Resume workflow | Clean resumed activity | Observation |
+| --- | --- | --- | --- |
+| Existing settings, one VM | Failed after 47.64 s | Not eligible | Verifier blocked on FUSE; the S3 socket had queued data and seven TCP retransmissions. |
+| Restored settings, one VM | Passed in 27.60 s | 1/1 | s3fs logged a 15-second read/write timeout, retried the request and recovered. |
+| Actual CLI with restored settings, three VMs | 3/3 passed, 26.86–31.12 s | 3/3 | All saved-state comparisons, workflows and activity checks passed. |
+
+Both fresh workflows and fresh activity windows passed. The diagnostic processes shared the same mount and network namespaces, ruling out inspection of a different mount. The corrected case verified saved app, browser, RAM and disk state without remounting S3 or restarting the saved app/browser. The state-verification deadline was not increased.
+
+The subsequent CLI confirmation also passed 3/3 fresh workflows and 3/3 fresh activity windows. Across the paired diagnostic and CLI confirmation, this investigation used five VMs total. Independent API checks confirmed all five deleted and all three run-specific S3 prefixes empty; the shared seed was unchanged. No larger test or other provider was run.
+
+This identifies the missing S3 recovery budget as the actionable harness defect. It does not establish why the pre-pause TCP connection stopped receiving acknowledgements, or imply that arbitrary network connections survive VM suspension. These small checks do not establish a provider reliability rate.
