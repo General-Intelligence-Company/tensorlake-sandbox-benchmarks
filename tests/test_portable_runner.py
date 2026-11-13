@@ -450,7 +450,7 @@ async def test_activity_drains_late_final_check_without_turning_it_into_a_pass(
     async def guest(sid, payload, timeout=600):
         calls.append(payload["op"])
         if payload["op"] == "activity":
-            return {}
+            return {"scheduled_at": 1000}
         done = calls.count("progress") > 1
         return {"activity": {"events": events if done else events[:-1], "done": done}}
 
