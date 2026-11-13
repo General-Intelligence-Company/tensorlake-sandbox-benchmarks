@@ -5,6 +5,7 @@ import os
 import queue
 import signal
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -20,9 +21,20 @@ def process_workload_requests(workload, jobs):
         except queue.Empty:
             job = None
         if job is not None:
+            started = time.monotonic()
             try:
+                result = workload.dispatch_workload_request(job)
+                finished = time.monotonic()
                 replies.put(
-                    {"ok": True, "result": workload.dispatch_workload_request(job)}
+                    {
+                        "ok": True,
+                        "result": result,
+                        "guest_timing": {
+                            "started": started,
+                            "finished": finished,
+                            "duration_s": finished - started,
+                        },
+                    }
                 )
             except Exception as e:
                 replies.put(
@@ -62,7 +74,9 @@ def main():
 
     # The portable runner reaches this over native exec, on loopback only.
     # The original Tensorlake controller uses its authenticated port proxy.
-    web = ThreadingHTTPServer((os.environ.get("BENCH_BIND_HOST", "0.0.0.0"), 8123), Handler)
+    web = ThreadingHTTPServer(
+        (os.environ.get("BENCH_BIND_HOST", "0.0.0.0"), 8123), Handler
+    )
     threading.Thread(target=web.serve_forever, daemon=True).start()
     process_workload_requests(workload, jobs)
 

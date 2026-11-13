@@ -20,6 +20,7 @@ from importlib.metadata import distribution
 from pathlib import Path
 
 from .providers import ProviderError
+from .tools import INSTALL
 
 
 class GuestFailure(RuntimeError):
@@ -85,10 +86,8 @@ class Evidence:
             value = update["value"]
             kind = update["kind"]
             rows = state["trials" if kind == "trial" else "operations"]
-            identity = (
-                lambda row: (row["case"], row["index"])
-                if kind == "trial"
-                else row["operation_id"]
+            identity = lambda row: (
+                (row["case"], row["index"]) if kind == "trial" else row["operation_id"]
             )
             index = next(
                 (i for i, row in enumerate(rows) if identity(row) == identity(value)),
@@ -374,55 +373,68 @@ class Runner:
             raise
 
     async def terminal(self, sid, row):
-        deadline, delay = row["t0"] + 180, 0.5
+        deadline, delay = row["t0"] + 180, 0.1
+        row["readiness_observations"] = []
         while time.monotonic() < deadline:
+            sent = time.monotonic()
             try:
-                data = json.loads(
-                    await self.exec(
-                        sid,
-                        python(
-                            "import time,json;print(json.dumps({'monotonic':time.monotonic()}))"
-                        ),
-                        min(20, deadline - time.monotonic()),
-                    )
+                output = await self.exec(
+                    sid,
+                    python(
+                        "import time,json;print(json.dumps({'monotonic':time.monotonic()}))"
+                    ),
+                    min(20, deadline - time.monotonic()),
                 )
+                received = time.monotonic()
+                data = json.loads(output)
                 row["terminal_ready_s"] = time.monotonic() - row["t0"]
                 row["anchor"] = {
                     "guest": data["monotonic"],
-                    "controller": time.monotonic(),
+                    "controller": received,
+                    "controller_before": sent,
                 }
+                row["readiness_observations"].append(
+                    {
+                        "sent_s": sent - row["t0"],
+                        "received_s": received - row["t0"],
+                        "passed": True,
+                    }
+                )
                 return
             except Exception as exc:
+                row["readiness_observations"].append(
+                    {
+                        "sent_s": sent - row["t0"],
+                        "received_s": time.monotonic() - row["t0"],
+                        "passed": False,
+                    }
+                )
                 row.setdefault("readiness_errors", []).append(
                     {"at": now(), "error": str(exc), "delay_s": delay}
                 )
-                if http_status(exc) in (401, 403):
+                if http_status(exc) in (401, 403, 429) or isinstance(
+                    exc, json.JSONDecodeError
+                ):
                     raise
                 await asyncio.sleep(min(delay, max(0, deadline - time.monotonic())))
-                delay = min(delay * 2, 30)
         raise TimeoutError("Terminal readiness exceeded 180 seconds")
 
     async def bootstrap(self, sid, row):
         start = time.monotonic()
         # Package installation is part of cold workflow time, reported separately.
         # Users can supply a tools image; this check never silently treats it as warm.
-        script = """set -eu
-if command -v sudo >/dev/null; then SUDO=sudo; else SUDO=; fi
-$SUDO mkdir -p /opt/bench /workspace /mnt/library /var/log/bench
-if ! test -x /opt/bench-venv/bin/python || ! command -v s3fs >/dev/null; then
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3 git s3fs curl
-  if ! command -v node >/dev/null || ! command -v npm >/dev/null; then
-    $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs npm
-  fi
-  $SUDO python3 -m venv /opt/bench-venv
-  $SUDO /opt/bench-venv/bin/pip -q install playwright==1.58.0
-  $SUDO /opt/bench-venv/bin/python -m playwright install --with-deps chromium
-fi
-$SUDO /opt/bench-venv/bin/python -c 'from playwright.sync_api import sync_playwright; from pathlib import Path; p=sync_playwright().start(); t=Path("/root/.agent-browser/browsers/portable"); t.mkdir(parents=True,exist_ok=True); c=t/"chrome"; c.symlink_to(p.chromium.executable_path) if not c.exists() else None; p.stop()'
-$SUDO chmod 1777 /workspace
-"""
+        script = INSTALL
         await self.exec(sid, script, 1200)
+        encoded = base64.b64encode(self.tools_archive()).decode()
+        await self.exec(
+            sid,
+            "printf %s " + shlex.quote(encoded) + " | base64 -d | "
+            "$(command -v sudo || true) tar xzf - -C /opt/bench",
+            120,
+        )
+        row["bootstrap_s"] = time.monotonic() - start
+
+    def tools_archive(self):
         cfg = json.loads((assets() / "manifest.example.json").read_text())
         cfg.update(
             provider=self.c["provider"],
@@ -445,14 +457,90 @@ $SUDO chmod 1777 /workspace
             info = tarfile.TarInfo("manifest.json")
             info.size, info.mode = len(data), 0o600
             archive.addfile(info, io.BytesIO(data))
-        encoded = base64.b64encode(buf.getvalue()).decode()
-        await self.exec(
-            sid,
-            "printf %s " + shlex.quote(encoded) + " | base64 -d | "
-            "$(command -v sudo || true) tar xzf - -C /opt/bench",
-            120,
-        )
-        row["bootstrap_s"] = time.monotonic() - start
+            checksums = "".join(
+                hashlib.sha256((assets() / name).read_bytes()).hexdigest()
+                + "  "
+                + name
+                + "\n"
+                for name in (
+                    "sandbox_workload.py",
+                    "run_sandbox_workload.py",
+                    "record_resource_usage.py",
+                    "shared-app.bundle",
+                )
+            ).encode()
+            info = tarfile.TarInfo("prepared.sha256")
+            info.size = len(checksums)
+            archive.addfile(info, io.BytesIO(checksums))
+        return buf.getvalue()
+
+    async def prepare_tools(self):
+        started = time.monotonic()
+        name = "sb-" + self.run_id + "-tools"
+        row = {
+            "case": "source-tools",
+            "index": 0,
+            "status": "dispatched",
+            "preparation": True,
+            "t0": started,
+        }
+        self.e.state["trials"].append(row)
+        self.e.save()
+        try:
+            if self.p.native_tools_build:
+                ref = {"id": name, "image_name": name, "kind": "image", "role": "tools"}
+                self.e.state["snapshots"].append(ref)
+                self.e.save()
+                sid = await self.e.mutation(
+                    "create",
+                    lambda: self.p.build_tools(name, INSTALL, self.tools_archive()),
+                    name=name,
+                )
+            else:
+                if self.c["provider"] == "boat":
+                    self.e.state["snapshots"].append(
+                        {"id": name, "kind": "tools_image", "role": "tools"}
+                    )
+                    self.e.save()
+                sid = await self.e.mutation(
+                    "create", lambda: self.p.create(name), name=name
+                )
+            self.e.state["owned"][sid] = {"name": name, "deleted": False}
+            row["sandbox_id"] = sid
+            await self.terminal(sid, row)
+            if not self.p.native_tools_build:
+                await self.bootstrap(sid, row)
+            ref = await self.e.mutation(
+                "snapshot", lambda: self.p.tools_snapshot(sid, name), id=sid, name=name
+            )
+            ref.update(source_id=sid, role="tools")
+            if self.p.native_tools_build:
+                self.e.state["snapshots"][0] = ref
+                self.c["image"] = ref["id"]
+            elif self.c["provider"] in ("boat", "modal"):
+                self.c["image"] = ref["id"]
+                if self.c["provider"] == "boat":
+                    self.e.state["snapshots"][0] = ref
+                else:
+                    self.e.state["snapshots"].append(ref)
+            else:
+                self.c["prepared_ref"] = ref
+                self.e.state["snapshots"].append(ref)
+            row["status"] = "passed"
+            self.e.state["prepared_tools"] = {
+                "reference": ref,
+                "duration_s": time.monotonic() - started,
+                "creation_method": "disk clone of stopped tools source"
+                if self.c["provider"] == "exe"
+                else "prepared base image",
+                "cold_install_in_measured_cases": False,
+            }
+        except BaseException as exc:
+            row.update(status="failed", error=str(exc))
+            raise
+        finally:
+            row["duration_s"] = time.monotonic() - started
+            self.e.save()
 
     async def start_guest(self, sid):
         env = {**self.s3.env, "BENCH_BIND_HOST": "127.0.0.1"}
@@ -476,7 +564,7 @@ $SUDO chmod 1777 /workspace
                 await asyncio.sleep(0.5)
         raise TimeoutError("Guest service did not start")
 
-    async def guest(self, sid, payload, timeout=600):
+    async def guest(self, sid, payload, timeout=600, timing=None):
         # A wedged FUSE read can delay Python's signal handler in the guest.
         # Bound the observing client as well, without restarting the saved mount.
         if payload.get("op") == "state":
@@ -500,9 +588,20 @@ $SUDO chmod 1777 /workspace
         data = json.loads(base64.b64decode(output))
         if not data["ok"]:
             raise GuestFailure(data)
+        if timing is not None:
+            elapsed = time.monotonic() - started
+            timing.update(
+                workflow_rpc_s=elapsed,
+                guest_workflow_s=data["guest_timing"]["duration_s"],
+                workflow_observation_overhead_s=max(
+                    0, elapsed - data["guest_timing"]["duration_s"]
+                ),
+            )
+            timing["guest_timing"] = data["guest_timing"]
         return data["result"]
 
     async def workload(self, sid, row, mode, expected=None, disk_expected=None):
+        setup_started = time.monotonic()
         if expected is not None:
             observed = (await self.guest(sid, {"op": "state"}))["state"]
             row["preservation"] = {
@@ -537,8 +636,14 @@ $SUDO chmod 1777 /workspace
             # RAM is deliberately not expected in a disk fork.
             await self.start_guest(sid)
         else:
-            await self.bootstrap(sid, row)
+            if self.c.get("prepared"):
+                await self.exec(
+                    sid, "cd /opt/bench && sha256sum -c prepared.sha256", 30
+                )
+            else:
+                await self.bootstrap(sid, row)
             await self.start_guest(sid)
+        row["harness_setup_s"] = time.monotonic() - setup_started
         payload = {
             "op": "setup",
             "case": row["case"],
@@ -550,11 +655,13 @@ $SUDO chmod 1777 /workspace
         if mode == "disk_resume":
             payload["previous_marker"] = disk_expected["marker"]
             payload["repo_path"] = disk_expected["repo_path"]
-        result = await self.guest(sid, payload, 1200)
+        result = await self.guest(sid, payload, 1200, timing=row)
         row["steps"] = result["steps"]
+        verification_started = time.monotonic()
         row["external_s3"] = await self.s3.verify(
             next(s["result"] for s in result["steps"] if s["step"] == "s3_write")
         )
+        row["external_verification_s"] = time.monotonic() - verification_started
         if not row["external_s3"]["passed"]:
             row["failure_domain"] = "external_s3_verification"
             raise RuntimeError("Independent S3 readback did not match")
@@ -566,6 +673,20 @@ $SUDO chmod 1777 /workspace
                 + row["anchor"]["controller"]
                 - row["t0"]
             )
+        row["guest_milestones_s"] = {
+            s["step"]: s["guest_monotonic"] - row["guest_timing"]["started"]
+            for s in result["steps"]
+        }
+        row["milestone_observation_bounds_s"] = {
+            s["step"]: {
+                "earliest": s["guest_monotonic"]
+                - row["anchor"]["guest"]
+                + row["anchor"]["controller_before"]
+                - row["t0"],
+                "latest": row[s["step"] + "_ready_s"],
+            }
+            for s in result["steps"]
+        }
         row["s3_write_ready_s"] = row["full_workflow_s"]
         return result["state"]
 
@@ -584,19 +705,29 @@ $SUDO chmod 1777 /workspace
             )
             self.e.save_trial(row)
             try:
+
+                async def dispatch():
+                    row["t0"] = time.monotonic()
+                    try:
+                        return await (
+                            self.p.resume(existing)
+                            if existing
+                            else self.p.create(name, ref)
+                        )
+                    finally:
+                        row["provider_lifecycle_s"] = time.monotonic() - row["t0"]
+
                 if existing:
                     sid = await self.e.mutation(
                         "resume",
-                        lambda: self.p.resume(existing),
+                        dispatch,
                         id=existing,
                         name=name,
                     )
                     if sid != existing:
                         raise RuntimeError("Same-ID resume returned another sandbox")
                 else:
-                    sid = await self.e.mutation(
-                        "create", lambda: self.p.create(name, ref), name=name
-                    )
+                    sid = await self.e.mutation("create", dispatch, name=name)
                     self.e.state["owned"][sid] = {"name": name, "deleted": False}
                     if ref and sid == ref["source_id"]:
                         raise RuntimeError("Fork reused its source ID")
@@ -928,14 +1059,35 @@ $SUDO chmod 1777 /workspace
                 not v.get("deleted")
                 for k, v in self.e.state["owned"].items()
                 if k not in source_ids
+                and k
+                != self.e.state.get("prepared_tools", {})
+                .get("reference", {})
+                .get("source_id")
             ):
                 raise RuntimeError("Cleanup not confirmed; next batch held")
         await self.cleanup_ids(source_ids)
 
     async def run(self):
         self.e.state["status"] = "running"
+        self.e.state["timing_contract"] = {
+            "provider_lifecycle_s": "Native create/fork/resume call, including network and any SDK-internal waits; excludes tools preparation and controller journal writes.",
+            "terminal_ready_s": "Observed first successful command since native dispatch; readiness probes retry at 100 ms after failure. Attempts and RPC bounds are retained.",
+            "guest_workflow_s": "Monotonic duration on the guest workload thread; excludes SDK transport, harness deployment and outside S3 verification.",
+            "harness_setup_s": "Runtime service startup, prepared image checks, cold bootstrap when requested, and saved-state observation before workload execution.",
+            "full_workflow_s": "Observed end-to-end from native dispatch through independent S3 verification, including harness setup. Never adjusted by subtracting estimated overhead.",
+            "native_waits": {
+                "beam": "Blocking sandbox_exec RPC with wait=True; no command-status polling",
+                "tensorlake": "Blocking create; resume SDK polling at 100 ms",
+                "modal": "Native stream reads and process wait",
+                "boat": "Blocking command endpoint",
+                "blaxel": "Native wait_for_completion=True",
+                "exe": "Blocking NDJSON command response",
+            }[self.c["provider"]],
+        }
         self.e.save()
         try:
+            if self.c.get("prepared") and self.c["suite"] == "workflow":
+                await self.prepare_tools()
             for case in self.c["lifecycles"]:
                 if case != "resume":
                     await self.phase(case)
@@ -956,6 +1108,9 @@ def summarize(state):
         "run_id": state["run_id"],
         "provider": state["config"]["provider"],
         "status": state["status"],
+        "timing_protocol": state.get("timing_protocol"),
+        "prepared_tools": state.get("prepared_tools"),
+        "timing_contract": state.get("timing_contract"),
         "cases": {},
     }
     for case in state["config"]["lifecycles"]:
@@ -1001,6 +1156,12 @@ def summarize(state):
             "full_workflow_s",
             "commands_s",
             "bootstrap_s",
+            "provider_lifecycle_s",
+            "harness_setup_s",
+            "guest_workflow_s",
+            "workflow_rpc_s",
+            "workflow_observation_overhead_s",
+            "external_verification_s",
         ):
             measured = sorted(r[field] for r in rows if r.get(field) is not None)
             result["cases"][case]["timings_s"][field] = {

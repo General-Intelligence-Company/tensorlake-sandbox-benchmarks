@@ -9,7 +9,7 @@
     "context/bench-resource-recorder.service": "589711be9ea8668603ba214daa162af7f66aa44d2206e743596d55451c55319c",
     "context/manifest.example.json": "1961bf042f785752aecf47d327c8f130a1222a1d0dc2c74438dd582f66d3cc29",
     "context/record_resource_usage.py": "3224922b0435e31bb20cfafeffc75404a34339937958ebd95e1e8cfddadc189b",
-    "context/run_sandbox_workload.py": "283a09294c4df405994bf5064b1eeee6a3ebf0effbc807077682b02cc67fd91f",
+    "context/run_sandbox_workload.py": "2056bd444f6a64d516fca1ce12a47437a94ae5d00c6f7c8b1480c4bd42c25c0d",
     "context/sandbox_workload.py": "925d62a40c7d5e751c53b45e7e76af95693bddb659228d3de40111dc58adefa6",
     "context/shared-app.bundle": "970712e622cf310dd1dbaea22a5d1c416dcf51e6f455c6c47b58f6b4dc6ad696",
     "controller/check_s3_read_retries.py": "12dc9442568135aeb5a102103042c55e8de878ea6db093bfa182427054217b7b",
@@ -31,9 +31,10 @@
     "image/build_tools_image.py": "62afb2fb783b3e06f9cd7b143d9e7995c8b54ec514432a38d9edb0c6654f7f3a",
     "pyproject.toml": "bdfd4e78fb2fe50c45cc430095f9a4fe4af65470d55fb75616bfd2f2deba52ba",
     "sandbox_bench/__init__.py": "7861300e148959da570cd348089880f4ddd32859b4f6b77db9441669de0ef5c3",
-    "sandbox_bench/cli.py": "438fa6e2890562d79dc83672091c5ca310153b90d64305ca59287a7112b55962",
-    "sandbox_bench/providers.py": "39b632c26ac7e0b64e2bb74144f5bce6a1a5831b6fccd479f1305678596c21ea",
-    "sandbox_bench/runner.py": "29c3a3039c743581e683c30735b4789b677d75de8683ba96468df39ce9a1b29a",
+    "sandbox_bench/cli.py": "9be60ef5ef552b7801f9e4b181c157a67620ee1dce119cc3f817d6a9684a43f4",
+    "sandbox_bench/providers.py": "b5eadd9807d7a898a48c14fc4dfc28a189fa44ae49a7953a0e49775fa92b23bd",
+    "sandbox_bench/runner.py": "d74a901c9c438678901496336ce864911374f46690463066ac5c6ca0a83f15f9",
+    "sandbox_bench/tools.py": "bb602c86344ebef8283fd172848746695da427fc02ba99ef9e2c139b4f32864b",
     "tests/test_portable_runner.py": "7aaa053201d9d264e91050b228f430075d54638eafe6a6da579173a473f0f72f",
     "uv.lock": "f5054cad3cda393dd94d22df69a9e16ea1626aab52a5c3dadda64c1171f93bf5"
   }
