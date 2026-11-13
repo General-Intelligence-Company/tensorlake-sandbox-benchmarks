@@ -750,7 +750,7 @@ $SUDO chmod 1777 /workspace
             row["artifact"] = str(path.relative_to(self.e.path))
         except Exception as exc:
             row["collection_error"] = str(exc)
-        self.e.save()
+        self.e.save_trial(row)
 
     async def cleanup_ids(self, ids):
         for sid in set(ids):
@@ -778,7 +778,7 @@ $SUDO chmod 1777 /workspace
                     raise RuntimeError("Deletion was not independently confirmed")
             except Exception as exc:
                 record["cleanup_error"] = str(exc)
-            self.e.save()
+        self.e.save()
 
     async def cleanup(self):
         # Reconcile names after an ambiguous create before deleting known IDs.
