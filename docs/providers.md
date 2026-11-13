@@ -35,6 +35,8 @@ Start and API limits can stop a run. The runner records the first response and l
 
 Uses the authenticated SDK with both API key and workspace. Do not replace its data-plane client with an HTTP client that loses workspace headers. Snapshots are a preview feature. They preserve memory and filesystem together; this adapter does not claim a disk-only snapshot.
 
+The default is `blaxel/py-app:latest`, whose Debian/Python base supports the shared workload installer. Creation uses the SDK's default deadline. Persistent test services use native processes with `keep_alive` enabled and the configured TTL, so automatic standby does not interrupt an active test window.
+
 Readiness observations use bounded exponential backoff. Authorization failures stop polling. Workload commands and snapshot/fork mutations are not retried by the runner. [Documentation](https://docs.blaxel.ai/)
 
 ## Beam

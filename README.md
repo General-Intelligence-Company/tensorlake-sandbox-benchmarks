@@ -97,6 +97,8 @@ Readiness milestones are cumulative from the create/fork/resume dispatch. Termin
 
 Dispatch writes only the changed record. Full history checkpoints happen outside measured workflows, so evidence from earlier batches does not delay later launches.
 
+Activity windows start after a lead based on observed guest-control round trips. This setup wait is separate from workflow timing and the 60-second window. Each guest records when it was armed; late starts and checks remain failures.
+
 **Cold tool installation is included in portable-runner workflow timing** and reported as `bootstrap_s`. Supplying an image with the tools already installed avoids that work. This differs from the original benchmark's prepared images and authenticated HTTP control transport: the portable runner uses native exec to reach a loopback guest service. Keep results from the two protocols separate.
 
 The S3 verifier retries only connection failures and `SlowDown`, up to three total attempts within a 15-second budget. Every attempt stays in the evidence. Authentication errors and content mismatches are not retried. Provider lifecycle writes are submitted once by the controller; provider SDK internal retries, where applicable, are described in [provider setup](docs/providers.md).
@@ -120,6 +122,6 @@ python3 check_source_integrity.py
 python3 controller/check_s3_read_retries.py
 ```
 
-These checks do not start cloud resources. The adapters have pinned-SDK and offline regression tests. We also ran live N=5 workflow validation on Boat, Tensorlake, Beam VMs and Modal. See the [results and remaining limitations](docs/live-validation-2026-11-12.md). Blaxel and exe.dev were not run in that validation. Run a small test in your own account before scaling.
+These checks do not start cloud resources. The adapters have pinned-SDK and offline regression tests. Live N=5 workflow validation now covers all six adapters: Boat, Tensorlake, Beam VMs, Modal, Blaxel and exe.dev. See the [November 13 validation and timing audit](docs/live-validation-2026-11-13.md), including the fixes, retained first attempts and cleanup limitations. The [November 12 results](docs/live-validation-2026-11-12.md) remain available. Run a small test in your own account before scaling.
 
 The shared workload lives in `context/`; provider operations are in `sandbox_bench/providers.py`; orchestration and evidence handling are in `sandbox_bench/runner.py`. Add another adapter without copying the workload. The original controller, source manifest and historical artifacts remain separate.
