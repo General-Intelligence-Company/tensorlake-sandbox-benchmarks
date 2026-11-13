@@ -562,10 +562,14 @@ class Exe(Provider):
             headers={"Authorization": "Bearer " + os.environ["EXE_API_KEY"]},
         )
 
-    async def api(self, command):
+    async def api(self, command, *, ndjson=False):
         import json
 
-        r = await self.http.post("https://exe.dev/exec", content=command)
+        r = await self.http.post(
+            "https://exe.dev/exec",
+            content=command,
+            headers={"Accept": "application/x-ndjson"} if ndjson else None,
+        )
         if r.is_error:
             raise ProviderError(r.text[:2000], r.status_code)
         try:
@@ -589,7 +593,9 @@ class Exe(Provider):
     async def exec(self, sid, command, timeout=180):
         import json
 
-        text = await self.api("ssh " + shlex.quote(sid) + " " + shlex.quote(command))
+        text = await self.api(
+            "ssh " + shlex.quote(sid) + " " + shlex.quote(command), ndjson=True
+        )
         stdout, stderr, code = "", "", None
         for line in text.splitlines():
             row = json.loads(line)
