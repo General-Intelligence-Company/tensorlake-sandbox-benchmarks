@@ -970,7 +970,7 @@ class Beam(Provider):
             self.vm(sid),
             "POST",
             "/" + quote(sid, safe="") + "/snapshot",
-            {"name": name},
+            {"name": "sb-" + name},
         )
         return {"id": value["id"], "kind": "disk"}
 
