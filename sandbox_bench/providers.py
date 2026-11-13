@@ -633,6 +633,10 @@ class Exe(Provider):
         return sid
 
     async def snapshot(self, sid, kind, name):
+        # cp copies disk blocks, so flush dirty guest pages before freezing them.
+        result = await self.exec(sid, "sync")
+        if result.exit_code != 0:
+            raise ProviderError("Guest filesystem flush failed: " + result.stderr[-1000:])
         await self.pause(sid)
         return {"id": sid, "kind": "disk", "retains_source": True}
 
