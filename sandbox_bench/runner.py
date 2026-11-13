@@ -508,6 +508,8 @@ class Runner:
                 )
             self.e.state["owned"][sid] = {"name": name, "deleted": False}
             row["sandbox_id"] = sid
+            # Image builds have their own deadline; readiness starts after deployment.
+            row["t0"] = time.monotonic()
             await self.terminal(sid, row)
             if not self.p.native_tools_build:
                 await self.bootstrap(sid, row)
