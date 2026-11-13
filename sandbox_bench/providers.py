@@ -373,15 +373,30 @@ class Blaxel(Provider):
             await self.Sandbox.create(
                 {
                     "name": name,
-                    "image": self.config.get("image") or "blaxel/base-image:latest",
+                    "image": self.config.get("image") or "blaxel/py-app:latest",
                     "memory": self.config["memory_mb"],
                     "region": self.config["region"],
                     "ttl": str(self.config["ttl_seconds"]) + "s",
                     "labels": {"sandbox_bench": self.config["run_id"]},
                 },
-                timeout=180,
             )
         return name
+
+    async def start_service(self, sid, command, log_path):
+        sb = await self.Sandbox.get(sid)
+        process = await sb.process.exec(
+            {
+                "name": "bench-service-" + str(time.time_ns()),
+                "command": "$(command -v sudo || true) bash -lc "
+                + shlex.quote(
+                    "exec " + command + " >> " + shlex.quote(log_path) + " 2>&1"
+                ),
+                "wait_for_completion": False,
+                "keep_alive": True,
+                "timeout": self.config["ttl_seconds"],
+            }
+        )
+        return int(process.pid)
 
     async def exec(self, sid, command, timeout=180):
         sb = await self.Sandbox.get(sid)
