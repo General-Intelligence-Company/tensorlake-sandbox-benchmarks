@@ -103,6 +103,8 @@ Workflow runs default to `prepared = true`. They install tools and stage benchma
 
 Prepared bases use each provider's native disk image/snapshot support. Blaxel uses its image builder. exe.dev uses a disk copy of a stopped tools-only source, so its prepared `fresh` case measures that creation path, not `new` from a registry image. The preparation method, reference and duration remain in `prepared_tools`; workload disk and memory forks still use separate sources containing the running app's state. All run-owned bases and source VMs are included in cleanup.
 
+The [prepared-image N=5 validation](docs/prepared-validation-2026-11-13.md) includes per-case timings and the preparation failures found during live execution.
+
 ### Timing fields
 
 | Field | Includes |
@@ -111,6 +113,7 @@ Prepared bases use each provider's native disk image/snapshot support. Blaxel us
 | `terminal_ready_s` | Time from native dispatch until the first successful terminal command is received. Every failed readiness probe and its send/receive bounds are recorded. |
 | `harness_setup_s` | Prepared-file checks, guest-service startup and saved-state observation before the workload; cold installation when requested. |
 | `guest_workflow_s` | Monotonic execution duration measured on the guest's workload thread. It excludes the native exec transport and outside S3 verifier. |
+| `workflow_rpc_s` | Complete workload RPC observation on the controller, including native command transport and response decoding. |
 | `workflow_observation_overhead_s` | Workload RPC duration minus guest execution duration. This contains transport, command launch and queueing; it is a measured residual, not a correction subtracted from other clocks. |
 | `external_verification_s` | Independent S3 readback, including recorded retries. |
 | `full_workflow_s` | The complete observed duration from dispatch through S3 verification, including harness setup. It stays available alongside the separated measurements. |

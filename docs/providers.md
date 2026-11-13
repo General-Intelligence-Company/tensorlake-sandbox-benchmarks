@@ -1,6 +1,6 @@
 # Provider setup
 
-The portable runner uses the integrations below. The adapters have offline contract checks and [N=5 live validation results](live-validation-2026-11-12.md) for Boat, Tensorlake, Beam VMs and Modal. A passing check does not establish that your account has snapshot access, enough quota, or a supported image.
+The portable runner uses the integrations below. See the [prepared-image N=5 validation](prepared-validation-2026-11-13.md) and earlier [live adapter checks](live-validation-2026-11-13.md). A passing check does not establish that your account has snapshot access, enough quota, or a supported image.
 
 | Provider | Install extra | Credentials | Implemented lifecycle cases |
 | --- | --- | --- | --- |
