@@ -5,7 +5,7 @@ import base64
 import os
 import shlex
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
 
@@ -71,12 +71,14 @@ class Command:
     stdout: str
     stderr: str = ""
     exit_code: int = 0
+    observation: dict = field(default_factory=dict)
 
 
 class Provider:
     """IDs and snapshot references are JSON values persisted in the ownership ledger."""
 
     resume_memory = True
+    native_tools_build = False
 
     def __init__(self, config):
         self.config = config
@@ -88,6 +90,9 @@ class Provider:
     async def prepare(self):
         """Optional image build before measured VM creation."""
         return None
+
+    async def tools_snapshot(self, sid, name):
+        return await self.snapshot(sid, "disk", name)
 
     async def start_service(self, sid, command, log_path):
         launcher = (
@@ -129,12 +134,14 @@ class Tensorlake(Provider):
         )
 
     async def create(self, name, ref=None):
+        ref = ref or self.config.get("prepared_ref")
         options = dict(
             name=name,
             timeout_secs=self.config["ttl_seconds"],
             startup_timeout=180,
             request_timeout=180,
             cancel_on_timeout=True,
+            poll_interval=0.1,
         )
         if ref:
             options["snapshot_id"] = ref["id"]
@@ -194,7 +201,7 @@ class Tensorlake(Provider):
         await self.client.suspend(sid, timeout=180, poll_interval=1)
 
     async def resume(self, sid):
-        await self.client.resume(sid, timeout=180, poll_interval=1)
+        await self.client.resume(sid, timeout=180, poll_interval=0.1)
         self.handles.pop(sid, None)
         return sid
 
@@ -237,7 +244,14 @@ class Modal(Provider):
         self.modal = modal
         self.app = None
 
+    async def prepare(self):
+        self.app = await self.modal.App.lookup.aio(
+            self.config["modal_app"], create_if_missing=True
+        )
+        return {"app": self.config["modal_app"], "timed": False}
+
     async def create(self, name, ref=None):
+        ref = ref or self.config.get("prepared_ref")
         m = self.modal
         if ref and ref["kind"] == "memory":
             sb = await m.Sandbox._experimental_from_snapshot.aio(
@@ -356,6 +370,8 @@ class Modal(Provider):
 
 
 class Blaxel(Provider):
+    native_tools_build = True
+
     def __init__(self, config):
         super().__init__(config)
         os.environ["BL_SANDBOX_READ_RETRIES"] = "0"
@@ -381,6 +397,43 @@ class Blaxel(Provider):
                 },
             )
         return name
+
+    async def build_tools(self, name, install, archive):
+        import tempfile
+        from pathlib import Path
+
+        from blaxel.core import ImageInstance
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tools.tar.gz"
+            path.write_bytes(archive)
+            image = (
+                ImageInstance.from_registry("python:3.11-slim-bookworm")
+                .run_commands(
+                    "printf %s "
+                    + shlex.quote(base64.b64encode(install.encode()).decode())
+                    + " | base64 -d | bash"
+                )
+                .add_local_file(str(path), "/tmp/bench-tools.tar.gz")
+                .run_commands(
+                    "mkdir -p /opt/bench && tar xzf /tmp/bench-tools.tar.gz -C /opt/bench && rm /tmp/bench-tools.tar.gz"
+                )
+            )
+            await image.build(name=name, memory=self.config["memory_mb"], timeout=1800)
+        return name
+
+    async def tools_snapshot(self, sid, name):
+        sandbox = await self.Sandbox.get(sid)
+        return {"kind": "image", "id": sandbox.spec.runtime.image, "image_name": sid}
+
+    async def tools_image_metadata(self, name):
+        from blaxel.core import ImageInstance
+
+        page = await ImageInstance.list_async(q=name)
+        async for image in page.auto_paging_iter():
+            if image.metadata.name == name:
+                return image.metadata
+        return None
 
     async def start_service(self, sid, command, log_path):
         sb = await self.Sandbox.get(sid)
@@ -447,9 +500,24 @@ class Blaxel(Provider):
         return {"id": snap.id, "kind": "memory"}
 
     async def delete_snapshot(self, ref):
+        if ref["kind"] == "image":
+            metadata = await self.tools_image_metadata(ref["image_name"])
+            if metadata is None:
+                return
+            r = await self.client.get_async_httpx_client().delete(
+                "/images/"
+                + quote(metadata.resource_type, safe="")
+                + "/"
+                + quote(metadata.name, safe="")
+            )
+            if r.status_code != 404:
+                r.raise_for_status()
+            return
         await self.Snapshot.delete(ref["id"])
 
     async def snapshot_absent(self, ref):
+        if ref["kind"] == "image":
+            return await self.tools_image_metadata(ref["image_name"]) is None
         r = await self.client.get_async_httpx_client().get(
             "/snapshots/" + quote(ref["id"], safe="")
         )
@@ -500,6 +568,25 @@ class Boat(Provider):
         )
         value = await self.request("POST", path, body)
         return value["sandbox"]["id"]
+
+    async def tools_snapshot(self, sid, name):
+        listing = await self.request("GET", "/named-snapshots")
+        if listing["allowance"]["free"] < 1:
+            raise ProviderError(
+                "No free Boat named snapshot allowance; preparation held"
+            )
+        await self.pause(sid)
+        await self.request("POST", "/named-snapshots", {"sandboxId": sid, "name": name})
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            data = await self.request("GET", "/named-snapshots/" + quote(name, safe=""))
+            status = data["snapshot"]["status"]
+            if status == "ready":
+                return {"id": name, "kind": "tools_image"}
+            if status == "failed":
+                raise ProviderError("Prepared Boat image failed")
+            await asyncio.sleep(1)
+        raise TimeoutError("Prepared Boat image did not become ready")
 
     async def exec(self, sid, command, timeout=180):
         r = await self.request(
@@ -559,10 +646,17 @@ class Boat(Provider):
         return {"id": sid, "kind": "disk", "retains_source": True}
 
     async def delete_snapshot(self, ref):
+        if ref["kind"] == "tools_image":
+            await self.request(
+                "DELETE", "/named-snapshots/" + quote(ref["id"], safe="")
+            )
+            return
         # Boat's unnamed disk fork source is itself an owned VM.
-        pass
 
     async def snapshot_absent(self, ref):
+        if ref["kind"] == "tools_image":
+            data = await self.request("GET", "/named-snapshots")
+            return all(s["name"] != ref["id"] for s in data["snapshots"])
         return await self.absent(ref["id"])
 
     async def close(self):
@@ -596,6 +690,7 @@ class Exe(Provider):
         return r.text
 
     async def create(self, name, ref=None):
+        ref = ref or self.config.get("prepared_ref")
         shape = f" --cpu={self.config['cpus']} --memory={self.config['memory_mb']}MB"
         command = (
             f"cp {shlex.quote(ref['id'])} {name} --standalone"
@@ -651,7 +746,9 @@ class Exe(Provider):
         # cp copies disk blocks, so flush dirty guest pages before freezing them.
         result = await self.exec(sid, "sync")
         if result.exit_code != 0:
-            raise ProviderError("Guest filesystem flush failed: " + result.stderr[-1000:])
+            raise ProviderError(
+                "Guest filesystem flush failed: " + result.stderr[-1000:]
+            )
         await self.pause(sid)
         return {"id": sid, "kind": "disk", "retains_source": True}
 
@@ -718,6 +815,7 @@ class Beam(Provider):
         return r.json() if r.content else {}
 
     async def create(self, name, ref=None):
+        ref = ref or self.config.get("prepared_ref")
         import uuid
 
         vm = self.vm(name)
@@ -765,12 +863,12 @@ class Beam(Provider):
             cid = vm.info["container_id"]
             stub = PodServiceStub(vm._service.channel)
 
-            def rpc(method, arg):
+            def rpc(method, arg, deadline=30):
                 token = request_metadata.set(
                     (("x-beta9-request-id", str(uuid.uuid4())),)
                 )
                 try:
-                    with rpc_timeout(min(30, timeout)):
+                    with rpc_timeout(min(deadline, timeout + 10)):
                         result = getattr(stub, method)(arg)
                     if not result.ok:
                         raise ProviderError(result.error_msg)
@@ -779,36 +877,56 @@ class Beam(Provider):
                     request_metadata.reset(token)
 
             rpc("sandbox_connect", PodSandboxConnectRequest(container_id=cid))
+            deadline = time.monotonic() + timeout
             r = rpc(
                 "sandbox_exec",
                 PodSandboxExecRequest(
                     container_id=cid,
                     command="bash -lc " + shlex.quote(command),
-                    wait=False,
+                    wait=True,
                 ),
+                deadline=timeout + 10,
             )
-            deadline = time.monotonic() + timeout
-            while not r.done:
-                status = rpc(
-                    "sandbox_status",
-                    PodSandboxStatusRequest(container_id=cid, pid=r.pid),
-                )
-                if status.exit_code >= 0:
-                    out = rpc(
-                        "sandbox_stdout",
-                        PodSandboxStdoutRequest(container_id=cid, pid=r.pid),
+            if not r.done:
+                observations = []
+                while time.monotonic() < deadline:
+                    sent = time.monotonic()
+                    status = rpc(
+                        "sandbox_status",
+                        PodSandboxStatusRequest(container_id=cid, pid=r.pid),
                     )
-                    err = rpc(
-                        "sandbox_stderr",
-                        PodSandboxStderrRequest(container_id=cid, pid=r.pid),
+                    observations.append(
+                        {
+                            "sent": sent,
+                            "received": time.monotonic(),
+                            "exit_code": status.exit_code,
+                        }
                     )
-                    return Command(
-                        r.stdout + out.stdout, r.stderr + err.stderr, status.exit_code
-                    )
-                if time.monotonic() > deadline:
-                    raise TimeoutError("Beam process did not finish")
-                time.sleep(0.25)
-            return Command(r.stdout, r.stderr, r.exit_code)
+                    if status.exit_code >= 0:
+                        out = rpc(
+                            "sandbox_stdout",
+                            PodSandboxStdoutRequest(container_id=cid, pid=r.pid),
+                        )
+                        err = rpc(
+                            "sandbox_stderr",
+                            PodSandboxStderrRequest(container_id=cid, pid=r.pid),
+                        )
+                        return Command(
+                            r.stdout + out.stdout,
+                            r.stderr + err.stderr,
+                            status.exit_code,
+                            {
+                                "mode": "native wait then same-PID observation",
+                                "pid": r.pid,
+                                "poll_interval_s": 0.1,
+                                "polls": observations,
+                            },
+                        )
+                    time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+                raise TimeoutError("Beam process did not finish; command not replayed")
+            return Command(
+                r.stdout, r.stderr, r.exit_code, {"mode": "native wait", "polls": []}
+            )
 
         return await asyncio.to_thread(run)
 
@@ -862,7 +980,7 @@ class Beam(Provider):
             self.vm(sid),
             "POST",
             "/" + quote(sid, safe="") + "/snapshot",
-            {"name": name},
+            {"name": "sb-" + name},
         )
         return {"id": value["id"], "kind": "disk"}
 

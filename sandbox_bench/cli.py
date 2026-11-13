@@ -20,6 +20,7 @@ def example(provider):
     return f'''# Keep credentials in environment variables, never in this file.
 provider = "{provider}"
 suite = "commands" # "workflow" also tests Chromium, the app, and mounted S3.
+prepared = true # Build tools once, before measured workflow cases.
 count = 5
 batch_size = 5
 concurrency = 5
@@ -52,6 +53,7 @@ def configuration(path):
     allowed = {
         "provider",
         "suite",
+        "prepared",
         "count",
         "batch_size",
         "concurrency",
@@ -69,6 +71,7 @@ def configuration(path):
         )
     c = {
         "suite": "commands",
+        "prepared": True,
         "count": 5,
         "batch_size": 5,
         "concurrency": 5,
@@ -83,6 +86,8 @@ def configuration(path):
         raise ValueError("Choose a provider: " + ", ".join(SPECS))
     if c["suite"] not in ("commands", "workflow"):
         raise ValueError("suite must be commands or workflow")
+    if type(c["prepared"]) is not bool:
+        raise ValueError("prepared must be true or false")
     for key in (
         "count",
         "batch_size",
@@ -165,7 +170,8 @@ def doctor(c):
         "notes": spec.notes,
         "count_per_lifecycle": c["count"],
         "maximum_owned_vms": min(c["batch_size"], c["count"])
-        + int(bool(set(c["lifecycles"]) & {"disk", "memory"})),
+        + int(bool(set(c["lifecycles"]) & {"disk", "memory"}))
+        + int(c["prepared"] and c["suite"] == "workflow"),
         "ok": not missing and installed,
     }
 
@@ -184,6 +190,9 @@ async def execute(args):
                 "run_id": run_id,
                 "created_at": now(),
                 "status": "prepared",
+                "timing_protocol": ("prepared-v1" if c["prepared"] else "cold-v1")
+                if c["suite"] == "workflow"
+                else "commands-v1",
                 "config": c,
                 "operations": [],
                 "owned": {},
@@ -285,9 +294,7 @@ def main():
         elif args.command == "report":
             print(
                 json.dumps(
-                    summarize(
-                        Evidence.read_state(args.run_dir)
-                    ),
+                    summarize(Evidence.read_state(args.run_dir)),
                     indent=2,
                 )
             )
