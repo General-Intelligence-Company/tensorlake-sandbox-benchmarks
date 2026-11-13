@@ -828,7 +828,12 @@ $SUDO chmod 1777 /workspace
                 self.e.state["s3_cleanup"] = {"error": str(exc)}
         self.e.save()
 
+    def require_confirmed_operations(self):
+        if any(o["status"] == "unconfirmed" for o in self.e.state["operations"]):
+            raise RuntimeError("Unconfirmed lifecycle operation; no further dispatch")
+
     async def phase(self, case):
+        self.require_confirmed_operations()
         if self.s3:
             self.s3.ensure_valid()
         ref, expected = None, None
@@ -864,10 +869,7 @@ $SUDO chmod 1777 /workspace
         for start in range(1, self.c["count"] + 1, self.c["batch_size"]):
             if self.s3:
                 self.s3.ensure_valid()
-            if any(o["status"] == "unconfirmed" for o in self.e.state["operations"]):
-                raise RuntimeError(
-                    "Unconfirmed lifecycle operation; no further dispatch"
-                )
+            self.require_confirmed_operations()
             indices = range(
                 start, min(start + self.c["batch_size"], self.c["count"] + 1)
             )
