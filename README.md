@@ -99,7 +99,29 @@ Dispatch writes only the changed record. Full history checkpoints happen outside
 
 Activity windows start after a lead based on observed guest-control round trips. This setup wait is separate from workflow timing and the 60-second window. Each guest records when it was armed; late starts and checks remain failures.
 
-**Cold tool installation is included in portable-runner workflow timing** and reported as `bootstrap_s`. Supplying an image with the tools already installed avoids that work. This differs from the original benchmark's prepared images and authenticated HTTP control transport: the portable runner uses native exec to reach a loopback guest service. Keep results from the two protocols separate.
+Workflow runs default to `prepared = true`. They install tools and stage benchmark files once in a separate preparation sandbox, then create a prepared base before dispatching measured cases. A measured case verifies the staged file hashes and fails if the prepared files are missing; it never silently installs tools. Set `prepared = false` to measure the cold-install protocol instead. Keep the protocols separate when comparing results.
+
+Prepared bases use each provider's native disk image/snapshot support. Blaxel uses its image builder. exe.dev uses a disk copy of a stopped tools-only source, so its prepared `fresh` case measures that creation path, not `new` from a registry image. The preparation method, reference and duration remain in `prepared_tools`; workload disk and memory forks still use separate sources containing the running app's state. All run-owned bases and source VMs are included in cleanup.
+
+### Timing fields
+
+| Field | Includes |
+| --- | --- |
+| `provider_lifecycle_s` | The native create/fork/resume call, including network transit and SDK waits. Local journal writes and tools preparation are outside this clock. This is an observed API duration, not internal provider boot time. |
+| `terminal_ready_s` | Time from native dispatch until the first successful terminal command is received. Every failed readiness probe and its send/receive bounds are recorded. |
+| `harness_setup_s` | Prepared-file checks, guest-service startup and saved-state observation before the workload; cold installation when requested. |
+| `guest_workflow_s` | Monotonic execution duration measured on the guest's workload thread. It excludes the native exec transport and outside S3 verifier. |
+| `workflow_observation_overhead_s` | Workload RPC duration minus guest execution duration. This contains transport, command launch and queueing; it is a measured residual, not a correction subtracted from other clocks. |
+| `external_verification_s` | Independent S3 readback, including recorded retries. |
+| `full_workflow_s` | The complete observed duration from dispatch through S3 verification, including harness setup. It stays available alongside the separated measurements. |
+
+`guest_milestones_s` records each step relative to guest execution start. `milestone_observation_bounds_s` brackets cumulative guest milestones using the terminal probe's send/receive times; cross-machine clock alignment is not treated as exact. Do not subtract an assumed network round trip or half a polling interval to manufacture provider-only latency.
+
+Providers return from creation at different states: some acknowledge a new ID while others wait for a running machine. Use `terminal_ready_s` for the common request-to-working-command comparison; do not rank provider startup by `provider_lifecycle_s` alone.
+
+Saved-state checks exercise the preserved browser, app and filesystem, including S3. Time spent in those checks is included in `harness_setup_s` and the end-to-end result. It can reflect real saved-session usability delays, not just controller overhead, so do not discard it or treat `guest_workflow_s` alone as time to a fully usable restored session.
+
+Readiness retries use a 100 ms interval after a failed command. Authentication and rate-limit responses stop observation. Tensorlake resume uses 100 ms SDK polling; its normally blocking create also uses 100 ms if the SDK falls back to polling after the server-side wait budget expires. Native command waits are used where available; Beam may return a running PID even with `wait=True`, so the runner observes that same PID at 100 ms and logs every observation without replaying the command. Faster polling reduces observation delay but still consumes API capacity; control concurrency for your account's limits.
 
 The S3 verifier retries only connection failures and `SlowDown`, up to three total attempts within a 15-second budget. Every attempt stays in the evidence. Authentication errors and content mismatches are not retried. Provider lifecycle writes are submitted once by the controller; provider SDK internal retries, where applicable, are described in [provider setup](docs/providers.md).
 

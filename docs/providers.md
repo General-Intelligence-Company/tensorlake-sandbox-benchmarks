@@ -37,13 +37,15 @@ Uses the authenticated SDK with both API key and workspace. Do not replace its d
 
 The default is `blaxel/py-app:latest`, whose Debian/Python base supports the shared workload installer. Creation uses the SDK's default deadline. Persistent test services use native processes with `keep_alive` enabled and the configured TTL, so automatic standby does not interrupt an active test window.
 
-Readiness observations use bounded exponential backoff. Authorization failures stop polling. Workload commands and snapshot/fork mutations are not retried by the runner. [Documentation](https://docs.blaxel.ai/)
+Prepared mode builds a private tools image before measured creation; it does not use a memory fork as a substitute for fresh creation. The build sandbox and its uniquely named image are recorded for cleanup. Workload commands wait through the native API. Authorization failures stop readiness observation. Workload commands and snapshot/fork mutations are not retried by the runner. [Documentation](https://docs.blaxel.ai/)
 
 ## Beam
 
 This adapter uses **VMs**, not serverless Sandboxes. It uses the pinned SDK's low-level VM and process APIs from our evaluation. Supplying a separate request ID to each process RPC avoids nested SDK retries and avoids deduplicating different calls.
 
 With no `provider_options.image`, the runner first prepares the default VM image using Beam's image builder. This may take time and incur provider charges. It is recorded separately from VM launch timing. The image remains in the provider's image cache; it is not a per-run VM or snapshot. To reuse a prepared VM image, put its ID in `provider_options.image`. Ordinary container image IDs without the Beam VM services will not work. [VM documentation](https://docs.beam.cloud/vms/overview)
+
+Prepared workflow mode additionally captures a run-owned tools-only disk base. Command execution requests native `wait=True`. The service can return a running PID for a long command; the runner observes that existing PID at 100 ms until completion, records each observation, and never resubmits the command. Guest execution timing excludes this response-observation delay.
 
 ## exe.dev
 
@@ -52,6 +54,8 @@ The HTTPS API key must allow `new`, `ls`, `ssh`, `cp`, `pause`, `resume`, and `r
 The API transports the same commands as the SSH interface. This adapter uses HTTPS, which may have different rate limits and overhead from the native SSH runs in our original evaluation. Copy is a disk test. The resume check tests the live app/browser state before changing it. [HTTPS API](https://exe.dev/docs/https-api), [command transport](https://exe.dev/docs/https-api-run-on-vm)
 
 Command responses request NDJSON, accept blank keepalive lines, and require an exit-code record. Before a disk snapshot, the adapter runs `sync` in the source VM: pausing alone can leave recent writes in RAM, while the copy reads disk blocks.
+
+In prepared mode, the fresh baseline is also created with `cp` from a stopped tools-only VM. This is a prepared disk-base launch, not a measurement of registry-image `new`. The workload disk phase has a different source with saved app code and dependencies. The report retains this distinction.
 
 ## Images and resource shapes
 

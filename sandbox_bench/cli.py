@@ -190,7 +190,9 @@ async def execute(args):
                 "run_id": run_id,
                 "created_at": now(),
                 "status": "prepared",
-                "timing_protocol": "prepared-v1" if c["prepared"] else "cold-v1",
+                "timing_protocol": ("prepared-v1" if c["prepared"] else "cold-v1")
+                if c["suite"] == "workflow"
+                else "commands-v1",
                 "config": c,
                 "operations": [],
                 "owned": {},

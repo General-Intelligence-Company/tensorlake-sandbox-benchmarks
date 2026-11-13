@@ -141,6 +141,7 @@ class Tensorlake(Provider):
             startup_timeout=180,
             request_timeout=180,
             cancel_on_timeout=True,
+            poll_interval=0.1,
         )
         if ref:
             options["snapshot_id"] = ref["id"]
@@ -400,6 +401,7 @@ class Blaxel(Provider):
     async def build_tools(self, name, install, archive):
         import tempfile
         from pathlib import Path
+
         from blaxel.core import ImageInstance
 
         with tempfile.TemporaryDirectory() as directory:
@@ -423,6 +425,15 @@ class Blaxel(Provider):
     async def tools_snapshot(self, sid, name):
         sandbox = await self.Sandbox.get(sid)
         return {"kind": "image", "id": sandbox.spec.runtime.image, "image_name": sid}
+
+    async def tools_image_metadata(self, name):
+        from blaxel.core import ImageInstance
+
+        page = await ImageInstance.list_async(q=name)
+        async for image in page.auto_paging_iter():
+            if image.metadata.name == name:
+                return image.metadata
+        return None
 
     async def start_service(self, sid, command, log_path):
         sb = await self.Sandbox.get(sid)
@@ -490,8 +501,14 @@ class Blaxel(Provider):
 
     async def delete_snapshot(self, ref):
         if ref["kind"] == "image":
+            metadata = await self.tools_image_metadata(ref["image_name"])
+            if metadata is None:
+                return
             r = await self.client.get_async_httpx_client().delete(
-                "/images/sandboxes/" + quote(ref["image_name"], safe="")
+                "/images/"
+                + quote(metadata.resource_type, safe="")
+                + "/"
+                + quote(metadata.name, safe="")
             )
             if r.status_code != 404:
                 r.raise_for_status()
@@ -500,13 +517,7 @@ class Blaxel(Provider):
 
     async def snapshot_absent(self, ref):
         if ref["kind"] == "image":
-            r = await self.client.get_async_httpx_client().get(
-                "/images/sandboxes/" + quote(ref["image_name"], safe="")
-            )
-            if r.status_code == 404:
-                return True
-            r.raise_for_status()
-            return False
+            return await self.tools_image_metadata(ref["image_name"]) is None
         r = await self.client.get_async_httpx_client().get(
             "/snapshots/" + quote(ref["id"], safe="")
         )
@@ -641,7 +652,6 @@ class Boat(Provider):
             )
             return
         # Boat's unnamed disk fork source is itself an owned VM.
-        pass
 
     async def snapshot_absent(self, ref):
         if ref["kind"] == "tools_image":
@@ -867,6 +877,7 @@ class Beam(Provider):
                     request_metadata.reset(token)
 
             rpc("sandbox_connect", PodSandboxConnectRequest(container_id=cid))
+            deadline = time.monotonic() + timeout
             r = rpc(
                 "sandbox_exec",
                 PodSandboxExecRequest(
@@ -878,7 +889,6 @@ class Beam(Provider):
             )
             if not r.done:
                 observations = []
-                deadline = time.monotonic() + timeout
                 while time.monotonic() < deadline:
                     sent = time.monotonic()
                     status = rpc(
