@@ -10,7 +10,7 @@
     "context/manifest.example.json": "1961bf042f785752aecf47d327c8f130a1222a1d0dc2c74438dd582f66d3cc29",
     "context/record_resource_usage.py": "3224922b0435e31bb20cfafeffc75404a34339937958ebd95e1e8cfddadc189b",
     "context/run_sandbox_workload.py": "283a09294c4df405994bf5064b1eeee6a3ebf0effbc807077682b02cc67fd91f",
-    "context/sandbox_workload.py": "700d992ddfd386d79958f779536e98b2c12574e9c6d0b9d21edade5ec75bf8be",
+    "context/sandbox_workload.py": "925d62a40c7d5e751c53b45e7e76af95693bddb659228d3de40111dc58adefa6",
     "context/shared-app.bundle": "970712e622cf310dd1dbaea22a5d1c416dcf51e6f455c6c47b58f6b4dc6ad696",
     "controller/check_s3_read_retries.py": "12dc9442568135aeb5a102103042c55e8de878ea6db093bfa182427054217b7b",
     "controller/run_benchmark.py": "021b0f34ced7bedb45454fab3d7b011c20e187bc03e3b6540811e0afa33fbde7",
@@ -32,8 +32,8 @@
     "sandbox_bench/__init__.py": "7861300e148959da570cd348089880f4ddd32859b4f6b77db9441669de0ef5c3",
     "sandbox_bench/cli.py": "438fa6e2890562d79dc83672091c5ca310153b90d64305ca59287a7112b55962",
     "sandbox_bench/providers.py": "da19d1b77e47c9dd8f10c506b870b417683e5b2d20c1f0482d3d877aadb60d6d",
-    "sandbox_bench/runner.py": "1f69dbd0c379be2ff1bf3eac8efeed454890b88c9731d8912a167a278cf085ce",
-    "tests/test_portable_runner.py": "bf0b031b3fee0ca4a1a2074633ae9adb06f508577b14cd81cd17da342f4bc1a6",
+    "sandbox_bench/runner.py": "d22287a3003610de35e777dfa0912de755362c0c165d04b30d40431b09507cd2",
+    "tests/test_portable_runner.py": "7aaa053201d9d264e91050b228f430075d54638eafe6a6da579173a473f0f72f",
     "uv.lock": "f5054cad3cda393dd94d22df69a9e16ea1626aab52a5c3dadda64c1171f93bf5"
   }
 }

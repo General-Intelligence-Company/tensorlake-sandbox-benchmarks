@@ -344,6 +344,7 @@ class Runner:
         self.c, self.p, self.e, self.s3 = config, provider, evidence, fixture
         self.slots = asyncio.Semaphore(config["concurrency"])
         self.run_id = self.e.state["run_id"]
+        self.guest_round_trip_s = 0.0
 
     async def exec(self, sid, command, timeout=180):
         start = time.monotonic()
@@ -491,7 +492,11 @@ $SUDO chmod 1777 /workspace
         )
         # Some native exec APIs insert newlines between output chunks. Base64
         # tolerates that framing without changing JSON strings or their bytes.
+        started = time.monotonic()
         output = await self.exec(sid, python(code), timeout + 10)
+        self.guest_round_trip_s = max(
+            self.guest_round_trip_s, time.monotonic() - started
+        )
         data = json.loads(base64.b64decode(output))
         if not data["ok"]:
             raise GuestFailure(data)
@@ -647,14 +652,22 @@ $SUDO chmod 1777 /workspace
         if self.c["suite"] != "workflow":
             return
         ready = [r for r in rows if r["status"] == "passed"]
-        epoch = time.time() + max(5, len(ready) * 0.25)
+        # Leave time for the native-exec transport to arm every guest. A fixed
+        # five-second lead can expire before slow control requests even arrive.
+        lead = max(5, len(ready) * 0.25, 2 * self.guest_round_trip_s + 5)
+        epoch = time.time() + lead
 
         async def schedule(row):
             try:
-                await self.guest(
+                receipt = await self.guest(
                     row["sandbox_id"],
                     {"op": "activity", "epoch": epoch, "cycles": 12, "duration": 60},
                 )
+                row["activity_schedule"] = {
+                    "lead_s": lead,
+                    "armed_at": receipt["scheduled_at"],
+                    "epoch": epoch,
+                }
             except Exception as exc:
                 row["activity"] = {
                     "passed": False,
@@ -705,6 +718,11 @@ $SUDO chmod 1777 /workspace
                     "events": events,
                     "done": value["done"],
                 }
+                if (
+                    not row["activity"]["passed"]
+                    and row["activity_schedule"]["armed_at"] > epoch + 1
+                ):
+                    row["activity"]["failure_domain"] = "harness_control"
             except Exception as exc:
                 row["activity"] = {
                     "passed": False,

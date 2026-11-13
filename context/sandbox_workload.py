@@ -605,7 +605,11 @@ class SandboxWorkload:
             }
         if op == "activity":
             self.activity = {**job, "events": [], "done": False}
-            return {"scheduled": True, "guest_monotonic": time.monotonic()}
+            return {
+                "scheduled": True,
+                "scheduled_at": time.time(),
+                "guest_monotonic": time.monotonic(),
+            }
         if op == "proof_write":
             prior = self.s3_prefix
             self.s3_prefix = (
