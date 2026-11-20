@@ -86,6 +86,8 @@ seed = "readme.txt"
 
 `resume` reuses eligible fresh sandboxes. Disk and memory tests prepare a source outside the measured cohort, then fork new IDs. Failed cases are not replaced. Unsupported cases fail configuration validation rather than silently using a different operation.
 
+For Blaxel, `resume` means wake from automatic standby. The harness keeps the sandbox awake throughout workflow and activity checks. Before resume, it stops only its dedicated sleep process, closes guest connections, and observes `STANDBY` through the control plane. The app and browser remain running. The native resume measurement is one process-start request that wakes the same sandbox and holds it active; it includes transport and process registration. The terminal probe is measured separately. Idle waiting and control-plane metadata reads are outside that timer. The resumed workflow checks the saved app, browser, RAM and disk state before continuing. These semantics differ from an explicit pause/resume API.
+
 **`count` is the total per lifecycle, not the concurrent VM count.** `batch_size` limits resident measured sandboxes; `concurrency` limits simultaneous trial setup. A snapshot source adds one resident VM. The defaults are deliberately small. Keep the total below your account capacity and leave room for other users. This runner does not reserve organization-wide capacity against other clients.
 
 Temporary AWS credentials must have at least 25 minutes left before a batch starts. They are not refreshed inside saved memory. If they expire or a quota blocks admission, the run stops, retains unfinished counts and cleans up what it can. There is no automatic continuation or replay of an interrupted lifecycle operation.

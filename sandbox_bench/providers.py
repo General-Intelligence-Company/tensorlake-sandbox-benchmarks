@@ -46,8 +46,8 @@ SPECS = {
     "blaxel": ProviderSpec(
         ("BL_API_KEY", "BL_WORKSPACE"),
         "blaxel",
-        ("fresh", "memory"),
-        "Snapshots capture RAM and filesystem and require preview access. No disk-only fork or explicit pause test in this adapter.",
+        ("fresh", "memory", "resume"),
+        "Snapshots capture RAM and filesystem and require preview access. Resume wakes the same sandbox after observed automatic standby; no disk-only fork.",
     ),
     "beam": ProviderSpec(
         ("BEAM_API_KEY",),
@@ -438,6 +438,7 @@ class Modal(Provider):
 
 class Blaxel(Provider):
     native_tools_build = True
+    cleanup_concurrency = 16
 
     def __init__(self, config):
         super().__init__(config)
@@ -447,6 +448,23 @@ class Blaxel(Provider):
         from blaxel.core.client.client import client
 
         self.Sandbox, self.Snapshot, self.client = SandboxInstance, Snapshot, client
+        self.awake_processes = {}
+
+    async def keep_awake(self, sid, sb):
+        name = "bench-awake-" + str(time.time_ns())
+        try:
+            process = await sb.process.exec({
+                "name": name,
+                "command": "sleep " + str(self.config["ttl_seconds"]),
+                "wait_for_completion": False,
+                "timeout": self.config["ttl_seconds"],
+                "keep_alive": True,
+            })
+            if str(process.status) != "running" or process.keep_alive is not True:
+                raise ProviderError("Could not hold sandbox awake")
+            self.awake_processes[sid] = name
+        finally:
+            await sb.process.get_client().aclose()
 
     async def create(self, name, ref=None):
         if ref:
@@ -475,7 +493,8 @@ class Blaxel(Provider):
             path = Path(directory) / "tools.tar.gz"
             path.write_bytes(archive)
             image = (
-                ImageInstance.from_registry("python:3.11-slim-bookworm")
+                # Same Docker Official Image, without Docker Hub's shared pull quota.
+                ImageInstance.from_registry("public.ecr.aws/docker/library/python:3.11-slim-bookworm")
                 .run_commands(
                     "printf %s "
                     + shlex.quote(base64.b64encode(install.encode()).decode())
@@ -486,7 +505,25 @@ class Blaxel(Provider):
                     "mkdir -p /opt/bench && tar xzf /tmp/bench-tools.tar.gz -C /opt/bench && rm /tmp/bench-tools.tar.gz"
                 )
             )
-            await image.build(name=name, memory=self.config["memory_mb"], timeout=1800)
+            try:
+                await image.build(name=name, memory=self.config["memory_mb"], timeout=1800)
+            except Exception as exc:
+                response = await self.client.get_async_httpx_client().get(
+                    "/sandboxes/" + quote(name, safe=""),
+                    headers={"Cache-Control": "no-cache"},
+                )
+                if response.status_code == 200:
+                    state = response.json()
+                    raise ProviderError(
+                        str(exc) + ": " + json.dumps({
+                            "status": state.get("status"), "errors": state.get("errors"),
+                            "failed_events": [
+                                {"type": e.get("type"), "message": e.get("message", "")[-2000:]}
+                                for e in (state.get("events") or []) if e.get("status") == "FAILED"
+                            ],
+                        })
+                    ) from exc
+                raise
         return name
 
     async def tools_snapshot(self, sid, name):
@@ -503,6 +540,8 @@ class Blaxel(Provider):
         return None
 
     async def start_service(self, sid, command, log_path):
+        if "resume" in self.config["lifecycles"] and sid not in self.awake_processes:
+            await self.keep_awake(sid, await self.Sandbox.get(sid))
         sb = await self.Sandbox.get(sid)
         process = await sb.process.exec(
             {
@@ -513,26 +552,72 @@ class Blaxel(Provider):
                     + " && exec " + command + " >> " + shlex.quote(log_path) + " 2>&1"
                 ),
                 "wait_for_completion": False,
-                "keep_alive": True,
+                # Resume tests must allow the running services to enter standby.
+                "keep_alive": "resume" not in self.config["lifecycles"],
                 "timeout": self.config["ttl_seconds"],
             }
         )
+        if "resume" in self.config["lifecycles"]:
+            await sb.process.get_client().aclose()
         return int(process.pid)
 
     async def exec(self, sid, command, timeout=180):
         sb = await self.Sandbox.get(sid)
         # Explicitly forward workspace authentication using the supported SDK.
         # Do not replace its client with a custom unauthenticated HTTP session.
-        p = await sb.process.exec(
-            {
-                "name": "bench-" + str(time.time_ns()),
-                "command": command,
-                "wait_for_completion": True,
-                "timeout": timeout,
-                "keep_alive": False,
-            }
-        )
+        try:
+            p = await sb.process.exec(
+                {
+                    "name": "bench-" + str(time.time_ns()),
+                    "command": command,
+                    "wait_for_completion": True,
+                    "timeout": timeout,
+                    "keep_alive": False,
+                }
+            )
+        finally:
+            if "resume" in self.config["lifecycles"]:
+                await sb.process.get_client().aclose()
         return Command(p.stdout or "", p.stderr or "", p.exit_code)
+
+    async def pause(self, sid):
+        sb = await self.Sandbox.get(sid)
+        try:
+            # Stop only the harness hold, keeping the app and browser intact.
+            await sb.process.stop(self.awake_processes[sid])
+            del self.awake_processes[sid]
+        finally:
+            await sb.process.get_client().aclose()
+        # Control-plane reads do not wake the guest. The idle wait and metadata
+        # lookup finish before the runner starts the native resume clock.
+        started = time.monotonic()
+        observations = []
+        while time.monotonic() - started < 180:
+            response = await self.client.get_async_httpx_client().get(
+                "/sandboxes/" + quote(sid, safe=""),
+                headers={"Cache-Control": "no-cache"},
+                params={"benchmark_probe": str(time.time_ns())},
+            )
+            response.raise_for_status()
+            state = response.json()
+            observations.append({
+                "elapsed_s": time.monotonic() - started,
+                "status": state.get("status"),
+                "state": state.get("state"),
+            })
+            if state.get("state") == "STANDBY":
+                self.handles[sid] = await self.Sandbox.get(sid)
+                return {"automatic_standby": True, "observations": observations}
+            if state.get("status") in ("TERMINATED", "FAILED", "DELETING"):
+                raise ProviderError("Sandbox became unavailable before standby: " + str(state))
+            await asyncio.sleep(1)
+        raise ProviderError("Automatic standby was not observed within 180 seconds")
+
+    async def resume(self, sid):
+        # This one native process request wakes the guest and holds it active.
+        # Subsequent terminal and workflow checks have their own measurements.
+        await self.keep_awake(sid, self.handles.pop(sid))
+        return sid
 
     async def inventory(self):
         page = await self.Sandbox.list()
